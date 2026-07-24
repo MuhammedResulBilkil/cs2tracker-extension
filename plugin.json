@@ -1,0 +1,9 @@
+{
+	"$schema": "https://raw.githubusercontent.com/SteamClientHomebrew/Millennium/main/src/system/plugin-schema.json",
+	"name": "cs2tracker-extension",
+	"common_name": "CS2Tracker Extension",
+	"description": "Adds CS2Tracker profile links to Steam profiles and friend lists.",
+	"version": "1.0.0",
+	"backendType": "lua",
+	"webkitApiVersion": "2.0.0"
+}

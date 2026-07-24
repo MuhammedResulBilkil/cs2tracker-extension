@@ -90,3 +90,14 @@ typings/
 # Planning documents stay local — process scaffolding, not product.
 docs/superpowers/
 .superpowers/
+
+# Millennium build output
+.millennium/
+
+# Release artifacts
+release/
+dist/
+*.zip
+
+# bun.lock is not the source of truth; pnpm-lock.yaml is
+bun.lock

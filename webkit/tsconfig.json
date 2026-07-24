@@ -1,0 +1,10 @@
+{
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"jsx": "react-jsx",
+		"lib": ["ES2020", "DOM", "DOM.Iterable"],
+		"types": []
+	},
+	"include": [".", "../shared"],
+	"exclude": ["node_modules", "../frontend"]
+}

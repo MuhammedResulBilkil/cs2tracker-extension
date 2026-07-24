@@ -1,0 +1,42 @@
+{
+	"name": "cs2tracker-extension",
+	"version": "1.0.0",
+	"description": "Adds CS2Tracker profile links to Steam profiles and friend lists.",
+	"type": "module",
+	"main": "./frontend/index.tsx",
+	"license": "MIT",
+	"scripts": {
+		"dev": "millennium-ttc --build dev",
+		"watch": "nodemon --watch webkit --watch frontend --watch shared --watch backend --ext ts,tsx,lua,json --exec \"millennium-ttc --build dev\"",
+		"build": "millennium-ttc --build prod",
+		"typecheck": "tsc -p frontend/tsconfig.json --noEmit && tsc -p webkit/tsconfig.json --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"trace-icon": "tsx scripts/trace-icon.ts",
+		"build-store-images": "tsx scripts/build-store-images.ts"
+	},
+	"dependencies": {
+		"@steambrew/client": "^5.8.5",
+		"@steambrew/webkit": "^5.8.4",
+		"react": "^19.2.8"
+	},
+	"devDependencies": {
+		"@semantic-release/changelog": "^6.0.3",
+		"@semantic-release/commit-analyzer": "^13.0.1",
+		"@semantic-release/exec": "^7.1.0",
+		"@semantic-release/git": "^10.0.1",
+		"@semantic-release/github": "^12.0.9",
+		"@semantic-release/release-notes-generator": "^14.1.1",
+		"@steambrew/ttc": "^3.3.7",
+		"@types/node": "^26.1.1",
+		"@types/react": "^19.2.17",
+		"archiver": "^8.0.0",
+		"happy-dom": "^20.11.1",
+		"nodemon": "^3.1.14",
+		"semantic-release": "^25.0.8",
+		"sharp": "^0.35.3",
+		"tsx": "^4.23.1",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.10"
+	}
+}
