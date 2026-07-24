@@ -1,12 +1,16 @@
-# pnpm will not run a dependency's install scripts unless that dependency is
-# explicitly approved. esbuild and @parcel/watcher both have install scripts,
-# and pnpm 11 treats unapproved ones as a hard error (ERR_PNPM_IGNORED_BUILDS)
-# rather than a warning. That error also trips the dependency freshness check
-# that runs before every `pnpm run` script, so without this file `pnpm run
-# build` exits non-zero before the compiler is ever invoked.
+# This repo is not a workspace. `packages: []` is required because pnpm 10.0
+# through 10.4 treat any pnpm-workspace.yaml as a workspace declaration and
+# refuse to install without it ("packages field missing or empty").
+packages: []
+
+# The build-approval keys below exist solely to silence pnpm 11's
+# ERR_PNPM_IGNORED_BUILDS, which makes `pnpm install` exit 1 and so also fails
+# the freshness check that runs before every `pnpm run` script. They are not
+# needed for the build to produce correct output: @esbuild/win32-x64 supplies
+# the binary as an optional dependency, with or without the install script.
 #
-# The setting is spelled `onlyBuiltDependencies` on pnpm 10 and `allowBuilds`
-# on pnpm 11. Both are listed so either major honors it.
+# Both spellings are listed — `onlyBuiltDependencies` covers pnpm 10 releases
+# from before `allowBuilds` was backported into 10.x.
 onlyBuiltDependencies:
   - '@parcel/watcher'
   - esbuild
