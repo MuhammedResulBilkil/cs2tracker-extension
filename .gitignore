@@ -86,3 +86,6 @@ typings/
 
 # DynamoDB Local files
 .dynamodb/
+
+# Planning documents stay local — process scaffolding, not product.
+docs/superpowers/
