@@ -89,3 +89,4 @@ typings/
 
 # Planning documents stay local — process scaffolding, not product.
 docs/superpowers/
+.superpowers/
