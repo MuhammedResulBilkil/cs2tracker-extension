@@ -1,3 +1,16 @@
+# pnpm will not run a dependency's install scripts unless that dependency is
+# explicitly approved. esbuild and @parcel/watcher both have install scripts,
+# and pnpm 11 treats unapproved ones as a hard error (ERR_PNPM_IGNORED_BUILDS)
+# rather than a warning. That error also trips the dependency freshness check
+# that runs before every `pnpm run` script, so without this file `pnpm run
+# build` exits non-zero before the compiler is ever invoked.
+#
+# The setting is spelled `onlyBuiltDependencies` on pnpm 10 and `allowBuilds`
+# on pnpm 11. Both are listed so either major honors it.
+onlyBuiltDependencies:
+  - '@parcel/watcher'
+  - esbuild
+
 allowBuilds:
   '@parcel/watcher': true
   esbuild: true
