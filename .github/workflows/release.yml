@@ -1,0 +1,75 @@
+name: Release
+
+on:
+    # Releases come from master and nowhere else. `release.config.mjs` says the
+    # same thing again, so a manual dispatch on a feature branch cannot publish
+    # either.
+    push:
+        branches: [master]
+    workflow_dispatch:
+
+permissions:
+    contents: write
+    # @semantic-release/github comments on the issues and pull requests a
+    # release closes.
+    issues: write
+    pull-requests: write
+
+# No `cancel-in-progress` here, unlike CI. A release is a sequence of
+# irreversible pushes — version-bump commit, tag, GitHub release, asset upload —
+# and a run killed partway through leaves some of them done and the rest not: a
+# tag with no release behind it, or a release with no zip attached. Both have to
+# be unwound by hand. The group is still worth having, without cancellation, so
+# that two runs cannot race for the same tag.
+concurrency:
+    group: release
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        # `push` is already filtered to master; this covers workflow_dispatch,
+        # which GitHub allows from any ref.
+        if: github.ref == 'refs/heads/master'
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  # semantic-release needs the whole history: the last tag to
+                  # diff from, and every commit since it to read subjects out of.
+                  fetch-depth: 0
+                  # semantic-release pushes the release commit and tag itself
+                  # using GITHUB_TOKEN. Leaving checkout's credential helper
+                  # installed would take that decision away from it.
+                  persist-credentials: false
+
+            - name: Set up pnpm
+              uses: pnpm/action-setup@v6
+              with:
+                  version: '11'
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v7
+              with:
+                  node-version: '24'
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            # CI owns the full typecheck matrix; these two steps are here for a
+            # different reason. semantic-release builds the bundles and the zip
+            # from its publish step, which runs *after* the release commit and
+            # tag have been pushed. Running the same test suite and the same
+            # build first means a failure lands while nothing has been published
+            # yet, instead of leaving a tag with no assets against it.
+            - name: Test
+              run: pnpm test
+
+            - name: Build
+              run: pnpm run build
+
+            - name: Release
+              run: pnpm exec semantic-release
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -60,6 +60,13 @@ jobs:
             - name: Typecheck build scripts
               run: pnpm exec tsc -p scripts/tsconfig.json --noEmit
 
+            # Two files carry the plugin's version and nothing in the build makes
+            # them match. A release syncs both, so the drift this catches is a
+            # hand-edit to one of them — silent, because the plugin still builds
+            # and loads, and only visible once the store shows the stale number.
+            - name: Verify package.json and plugin.json agree on version
+              run: pnpm exec tsx scripts/sync-version.ts --check
+
             - name: Test
               run: pnpm test
 
