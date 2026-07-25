@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	FRIEND_BADGE_CLASS,
+	FRIEND_CONTENT_SELECTOR,
 	FRIEND_BLOCK_SELECTOR,
 	injectFriendBlocks,
 	observeFriendBlocks,
@@ -63,19 +64,37 @@ describe('injectFriendBlocks', () => {
 	});
 
 	/**
-	 * Where the badge lands is the whole of its layout. The stylesheet positions it absolutely and makes
-	 * .friend_block_v2 position:relative to be its containing block, so a badge appended to the body -- or
-	 * to any descendant that Steam happens to position -- resolves against something else and lands
-	 * somewhere unrelated while every count in this file stays green. The parent check is the assertion:
-	 * querySelector alone matches a badge nested arbitrarily deep inside the row.
+	 * The mount point is the whole of this badge's collision behaviour, so it is asserted exactly.
+	 *
+	 * It was a direct child of the row, positioned absolutely into the top-right corner. A live client
+	 * showed why that fails: a ban-checker browser extension held the same corner with a 24x24 image inside
+	 * a wrapper at z-index 10, so the badge rendered and every click landed on the extension's image. The
+	 * other three corners were covered by Steam's row-wide a.selectable_overlay.
+	 *
+	 * Mounting into .friend_block_content -- the same container that extension uses -- puts both badges in
+	 * normal flow, side by side, so neither covers the other and the result is the same whether or not that
+	 * extension is installed. Reverting to row.appendChild fails this.
 	 */
-	it('nests the badge inside its own row', () => {
+	it('mounts the badge in the row content, beside anything else living there', () => {
 		document.body.innerHTML = friendRow('76561198145891996');
 		injectFriendBlocks(document, false);
 		const row = document.querySelector('.friend_block_v2')!;
 		const badge = row.querySelector(`a.${FRIEND_BADGE_CLASS}`);
 		expect(badge).not.toBeNull();
-		expect(badge!.parentElement).toBe(row);
+		expect(badge!.parentElement).toBe(row.querySelector(FRIEND_CONTENT_SELECTOR));
+	});
+
+	/**
+	 * Steam does not guarantee the content container, so the mount is a fallback rather than a requirement.
+	 * Without this, a row shape lacking it would silently get no badge -- the failure mode this whole module
+	 * has been bitten by twice.
+	 */
+	it('falls back to the row when it has no content container', () => {
+		document.body.innerHTML =
+			'<div class="selectable friend_block_v2 persona online" data-steamid="76561198145891996"></div>';
+		expect(injectFriendBlocks(document, false)).toBe(1);
+		const row = document.querySelector('.friend_block_v2')!;
+		expect(row.querySelector(`a.${FRIEND_BADGE_CLASS}`)!.parentElement).toBe(row);
 	});
 
 	it('uses the external URL scheme when openExternal is on', () => {
@@ -254,7 +273,7 @@ describe('injectFriendBlocks', () => {
 
 		const badge = other.querySelector(`a.${FRIEND_BADGE_CLASS}`);
 		expect(badge).not.toBeNull();
-		expect(badge!.parentElement).toBe(other.querySelector('.friend_block_v2'));
+		expect(badge!.parentElement).toBe(other.querySelector(FRIEND_CONTENT_SELECTOR));
 		expect(badge!.querySelector('svg')).not.toBeNull();
 		expect(other.getElementById('cs2tracker-extension-style')).not.toBeNull();
 		expect(ambientImportNode).not.toHaveBeenCalled();

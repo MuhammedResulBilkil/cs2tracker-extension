@@ -21,16 +21,18 @@ export const STYLE_ELEMENT_ID = 'cs2tracker-extension-style';
  * where they are -- WCAG 2.4.7. The replacement reuses the hover accent so the two states read as one
  * design, and outline-offset keeps the ring clear of the border.
  *
- * .friend_block_v2 is Steam's own class, and touching it has a real cost that runs in both directions.
- * Forwards: every badge is position:absolute, so the row has to be a positioned ancestor or the badge
- * escapes to whatever positioned element is next up the tree. Backwards, and this is the part worth
- * checking against a live client: position:relative is *not* visually inert. It makes the row the
- * containing block for any absolutely-positioned descendant Steam already has in there -- its row-wide
- * link overlay and status markers, among others -- so any of those currently resolving against an
- * ancestor further out silently re-anchor to the row. The declaration is still the narrowest hook
- * available, but it is a change to Steam's layout, not a no-op. Related: a positioned box with
- * z-index:auto starts no stacking context, so the badge's z-index competes with Steam's overlay in
- * whichever context encloses them both.
+ * This sheet no longer declares a rule for any class of Steam's own, and that is deliberate. It used to
+ * carry `.friend_block_v2{position:relative}`, needed because the friend badge was absolutely positioned
+ * in the row's corner and something had to be its containing block. The cost, noted at the time and
+ * confirmed against a live client, ran in both directions: position:relative is not visually inert, so it
+ * also made the row the containing block for any absolutely-positioned descendant Steam already had in
+ * there, silently re-anchoring anything that previously resolved further out.
+ *
+ * The corner turned out to be contested anyway -- see the friend-badge rule below -- so the badge moved
+ * into normal flow and the row no longer needs to be positioned. Removing the rule ends a mutation of
+ * Steam's layout that this plugin never actually wanted, and there is no longer a reason to reintroduce
+ * one: if a future badge needs a containing block, give it a wrapper of our own rather than positioning
+ * an element we do not own.
  *
  * text-decoration:none is declared twice on purpose. Nothing here can see Steam's stylesheet, so the
  * base declaration wins on source order against an equally specific Steam rule and loses to a more
@@ -57,8 +59,16 @@ const CSS = [
 	'.cs2tracker-btn__accent{display:inline-block;color:#007aef;transition:color .5s cubic-bezier(.23,1,.32,1)}',
 	'.cs2tracker-btn:hover .cs2tracker-btn__accent{color:#2aa6ff}',
 	'.cs2tracker-btn__icon{height:22px;width:22px;flex:0 0 auto}',
-	'.friend_block_v2{position:relative}',
-	'.cs2tracker-friend-badge{position:absolute;top:6px;right:6px;z-index:5;display:flex;height:22px;width:22px;align-items:center;justify-content:center;border-radius:4px;background-color:rgba(12,16,23,.85);opacity:.75;transition:opacity .15s ease}',
+	// position:relative, not absolute. In normal flow the badge cannot collide with anything else that has
+	// claimed a corner of the row -- a ban-checker extension was found holding the top-right at z-index 10,
+	// and Steam's own row-wide a.selectable_overlay covers the rest -- so it lays out beside such a badge
+	// instead of fighting it for the same pixels.
+	//
+	// It still needs to be positioned, and it still needs a z-index: selectable_overlay is stacked over the
+	// row's content, so an unpositioned badge is visible but not clickable. 5 clears the overlay. It is
+	// deliberately *below* the extension's 10, because outranking that would cover their verdict and break
+	// their feature to fix ours.
+	'.cs2tracker-friend-badge{position:relative;z-index:5;display:inline-flex;flex:0 0 auto;height:20px;width:20px;margin-left:6px;vertical-align:middle;align-items:center;justify-content:center;border-radius:4px;background-color:rgba(12,16,23,.85);opacity:.75;transition:opacity .15s ease}',
 	'.cs2tracker-friend-badge:hover{opacity:1}',
 	'.cs2tracker-friend-badge svg{height:16px;width:16px}',
 ].join('');

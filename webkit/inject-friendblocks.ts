@@ -19,6 +19,15 @@ export const FRIEND_BLOCK_SELECTOR = '.friend_block_v2[data-steamid]';
 /** Marks the badge this module owns. It is the style hook and the teardown key both. */
 export const FRIEND_BADGE_CLASS = 'cs2tracker-friend-badge';
 
+/**
+ * The row's text container -- friend name and last-online line. Exported so a test can build a fixture
+ * that has one, since where the badge mounts is the whole of its collision behaviour.
+ *
+ * Steam does not guarantee it: a row shape without this element still gets a badge, appended to the row.
+ * That case is covered and is why the mount is a fallback rather than a requirement.
+ */
+export const FRIEND_CONTENT_SELECTOR = '.friend_block_content';
+
 /** dataset key `cs2trackerInjected` maps to the `data-cs2tracker-injected` attribute. */
 const INJECTED_MARKER = 'cs2trackerInjected';
 
@@ -83,11 +92,22 @@ export function injectFriendBlocks(doc: Document, openExternal: boolean): number
 		const icon = createIcon(doc, '');
 		if (icon) badge.appendChild(icon);
 
-		// A direct child of the row, which is a layout requirement rather than a style preference. The
-		// stylesheet positions the badge absolutely and makes .friend_block_v2 position:relative to be its
-		// containing block; appended anywhere else the badge resolves against a different positioned
-		// ancestor and lands somewhere unrelated.
-		row.appendChild(badge);
+		// Into the row's text container when there is one, falling back to the row itself.
+		//
+		// This used to be an absolutely positioned corner badge on the row, and that was wrong for a reason
+		// worth recording. The row's top-right corner is contested: a live client had a ban-checker browser
+		// extension putting a 24x24 verdict image at the same coordinates, inside a wrapper carrying
+		// z-index:10, so the badge rendered perfectly and every click landed on the extension's image
+		// instead. Raising our z-index past theirs would have won the pixel and broken their feature -- the
+		// same trade in the other direction -- and every other corner was covered by Steam's own
+		// a.selectable_overlay, the row-wide link.
+		//
+		// Sitting in normal flow inside the same container removes the contest instead of winning it: two
+		// badges lay out side by side, and it behaves identically whether or not that extension is present.
+		// The stylesheet keeps a z-index on the badge, but now only to clear selectable_overlay rather than
+		// to outrank another plugin.
+		const mount = row.querySelector<HTMLElement>(FRIEND_CONTENT_SELECTOR) ?? row;
+		mount.appendChild(badge);
 		injected += 1;
 	});
 

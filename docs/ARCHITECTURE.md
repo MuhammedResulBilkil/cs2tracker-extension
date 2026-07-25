@@ -375,6 +375,41 @@ defensible.
 
 Anything claiming the plugin makes only one request is also wrong, and row 2 is the reason.
 
+### Do not compete for a corner, and do not style a class you do not own
+
+The friend badge used to be `position: absolute` in the row's top-right corner, which required
+`.friend_block_v2 { position: relative }` — a rule for one of Steam's own classes — to give it a
+containing block. Both decisions were wrong, and a live client proved it.
+
+A ban-checker browser extension, loaded through `extendium`, holds that same corner: a 24×24 image
+inside a wrapper carrying `z-index: 10`. Ours was `z-index: 5`. The badge rendered correctly, the
+magenta outline of a diagnostic build sat exactly around their icon, and every click landed on their
+image. Nothing in the automated suite could see it — the DOM was right and only paint order was wrong.
+
+Raising our `z-index` past theirs would have worked and would still have been wrong: it wins the pixel
+by covering their verdict, breaking their feature to fix ours. And relocating was no escape either — a
+corner probe found Steam's own row-wide `a.selectable_overlay` sitting under the other three.
+
+The fix was to stop competing. The badge is now `position: relative` in **normal flow**, mounted into
+`.friend_block_content` — the same container that extension uses — so the two lay out side by side and
+the result is identical whether or not it is installed. It keeps a `z-index` only to clear
+`selectable_overlay`, and deliberately stays *below* 10 so it can never cover the other badge.
+
+Two rules follow, both now enforced by tests:
+
+- **Mount in flow, not in a corner.** Any absolutely-positioned corner badge is a bet that no other
+  plugin, extension or theme wants that corner. On a machine running eight plugins and a theme, that
+  bet loses.
+- **Style nothing you do not own.** `webkit/styles.ts` now declares no rule for any class that is not
+  `cs2tracker-`-prefixed, and a test asserts that as a whole-sheet property rather than by naming the
+  class that happened to cause the problem. `position: relative` on someone else's element is not
+  visually inert — it re-anchors every absolutely-positioned descendant they already had.
+
+The diagnostic that settled this is worth reusing: outline the injected elements, then report
+`document.elementFromPoint` at the centre of one. It names the element receiving the click, which no
+amount of reading stylesheets could establish — eight page stylesheets and the theme's CSS between them
+had no rule that explained the behaviour.
+
 ## Store review rules the code is shaped by
 
 These are requirements from the plugin database's review, not preferences. Each one has already

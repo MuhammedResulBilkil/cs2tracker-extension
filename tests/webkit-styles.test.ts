@@ -59,7 +59,8 @@ describe('ensureStyles', () => {
 		'.cs2tracker-btn:hover',
 		'.cs2tracker-btn:focus-visible',
 		'.cs2tracker-btn__icon',
-		'.friend_block_v2',
+		'.cs2tracker-btn__accent',
+		'.cs2tracker-btn:hover .cs2tracker-btn__accent',
 		'.cs2tracker-friend-badge',
 		'.cs2tracker-friend-badge:hover',
 		'.cs2tracker-friend-badge svg',
@@ -69,21 +70,30 @@ describe('ensureStyles', () => {
 	});
 
 	/**
-	 * The declaration, looked up inside its own rule -- not the rule's full text.
+	 * Replaces an assertion that pinned `.friend_block_v2{position:relative}`, a rule this sheet used to
+	 * need because the friend badge was absolutely positioned in the row's corner and something had to be
+	 * its containing block.
 	 *
-	 * Pinning the literal '.friend_block_v2{position:relative}' froze the rule at exactly one
-	 * declaration: adding isolation:isolate, which this module's docblock contemplates as the answer to
-	 * the deferred stacking-context question, would have failed a test named for the positioned ancestor
-	 * about an edit that does not touch it. The weaker assertion kills the deletion just as dead.
+	 * Styling a class you do not own is a change to Steam's layout in both directions: position:relative
+	 * also makes the row the containing block for any absolutely-positioned descendant Steam already has
+	 * inside it, so anything that used to resolve against an ancestor further out silently re-anchors.
+	 * The badge is in normal flow now and the rule is gone, so the property worth defending inverted --
+	 * from "this rule exists" to "no rule like it comes back".
 	 *
-	 * Every badge is position:absolute, so this declaration is what makes the friend row the badge's
-	 * containing block. Without it each badge silently reparents to whatever positioned ancestor is next
-	 * up the tree: nothing fails, nothing is visible in CI, and nothing is wrong until somebody opens
-	 * Steam. It is the hardest coupling in this module and it had no assertion at all.
+	 * Asserted as a whole-sheet property rather than by naming the old selector, because the hazard is
+	 * the category, not that one class: `.persona`, `.friend_block_content`, `.selectable_overlay` and
+	 * `.player_avatar` would all be the same mistake, and the next person reaching for one of them will
+	 * not pick the class this test happens to remember.
 	 */
-	it('makes the friend row a positioned ancestor for the badge', () => {
+	it('styles no class it does not own', () => {
 		ensureStyles(document);
-		expect(ruleBody(cssOf(document), '.friend_block_v2')).toContain('position:relative');
+		const selectors = [...rulesOf(cssOf(document)).keys()];
+		expect(selectors.length).toBeGreaterThan(0);
+
+		const foreign = selectors.filter((selector) =>
+			[...selector.matchAll(/\.([A-Za-z0-9_-]+)/g)].some(([, name]) => !name.startsWith('cs2tracker-')),
+		);
+		expect(foreign).toEqual([]);
 	});
 
 	/**
