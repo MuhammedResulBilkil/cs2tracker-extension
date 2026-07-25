@@ -32,12 +32,20 @@ const getSettingsRpc = callable<[], unknown>('GetSettings');
  * a truncated payload, JSON that will not parse, a value of the wrong type, a payload that is not a string at
  * all -- is total inside parseSettings and never reaches here.
  *
- * The log line is what separates "the user turned it off" from "settings never arrived" when somebody reports
- * a missing button, and it sits here because this is the only place the error object exists.
+ * Both console calls live here rather than in the helper, and they say different things. The error is "the
+ * call failed"; the warning is "the call answered with something unusable", which is the one that separates
+ * "the user turned it off" from "the user's toggle is being discarded" when somebody reports a missing button.
+ * parseSettings stays console-free and therefore testable without a spy on every case, and it decides what
+ * counts as a problem -- notably, an empty config is not one.
+ *
+ * The hook is diagnostics only. It cannot change what is returned: parseSettings ignores anything it answers
+ * with and swallows anything it throws, so every failure path here still ends at the documented defaults.
  */
 export async function readSettings(): Promise<PluginSettings> {
 	try {
-		return parseSettings(await getSettingsRpc());
+		return parseSettings(await getSettingsRpc(), (reason) => {
+			console.warn(`[CS2Tracker] Unusable settings payload: ${reason}. Falling back to defaults.`);
+		});
 	} catch (error) {
 		console.error('[CS2Tracker] Failed to read settings:', error);
 		return { ...DEFAULT_SETTINGS };

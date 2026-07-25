@@ -25,33 +25,95 @@ export function normalizeSettings(raw: unknown): PluginSettings {
 }
 
 /**
+ * Names a decoded JSON value in a reason string. `typeof` alone is not enough: it answers "object" for both
+ * null and an array, which are the two shapes a hand-written guard most often lets through.
+ */
+function jsonKind(value: unknown): string {
+	if (value === null) return 'null';
+	if (Array.isArray(value)) return 'an array';
+	return `a ${typeof value}`;
+}
+
+/**
+ * Report a problem without letting it change the answer.
+ *
+ * The try/catch is the whole reason this is a function. parseSettings is documented total, and a hook is
+ * somebody else's code: without this, passing one that throws would turn a malformed payload from "defaults"
+ * into an exception, which is precisely the diagnostics-altering-behaviour that the hook exists to avoid.
+ * Nothing is logged about a failed report, because the only place left to log it is the console this design
+ * is keeping out of here.
+ */
+function report(onProblem: ((reason: string) => void) | undefined, reason: string): void {
+	try {
+		onProblem?.(reason);
+	} catch {
+		/* a diagnostic must never change the answer */
+	}
+}
+
+/**
  * Decode a settings payload as it arrives from the Lua backend -- a JSON string over the IPC channel -- into
  * a complete settings object. Total: every malformed input answers with a fresh copy of the defaults, and
- * nothing here throws or logs.
+ * nothing here throws or writes to the console.
  *
- * It takes `unknown` rather than `string` on purpose, and that is the whole point of the function rather
- * than defensiveness about it. The IPC helper is typed `callable<Args, T>` with `T` a free type parameter
- * cast straight onto `Promise<T>`, so declaring the return as `string` asserts a shape that nothing checks
- * at runtime. If the Millennium runtime ever hands back an already-decoded object, `JSON.parse` receives
+ * It takes `unknown` rather than `string` on purpose, and that is the point of the function rather than
+ * defensiveness about it. The IPC helper is typed `callable<Args, T>` with `T` a free type parameter cast
+ * straight onto `Promise<T>`, so declaring the return as `string` asserts a shape that nothing checks at
+ * runtime. If the Millennium runtime ever hands back an already-decoded object, `JSON.parse` receives
  * "[object Object]" through coercion and throws, a caller's catch substitutes defaults, and the user's real
- * settings are silently ignored on every page from then on. `unknown` makes that unrepresentable: the type
- * of the boundary is "whatever arrived", and the check is the code below rather than a claim in a
- * declaration.
+ * settings are silently ignored on every page from then on. `unknown` makes that unrepresentable: the type of
+ * the boundary is "whatever arrived", and the check is the code below rather than a claim in a declaration.
  *
- * The whitespace check earns its place next to the falsy one because the backend answers "{}" when it
- * cannot encode and an unreachable one can answer with nothing at all -- neither is a fault, and neither
- * should reach JSON.parse to be reported as one.
+ * `onProblem` is how this stays console-free without going silent. It fires only for a payload that could not
+ * be used as given, never for one that legitimately yields defaults, and that distinction is the entire
+ * value of it -- a hook that also fired for "{}" would train its reader to ignore it. So an absent or blank
+ * payload is quiet: the backend answers "{}" when it cannot encode -- having already logged the reason on the
+ * Lua side -- and an empty config is what a first run looks like before anything has been written. Blank
+ * rather than strictly empty, because `cjson.encode` cannot produce whitespace, so a payload of spaces means
+ * the same thing an empty one does and not something worth its own vocabulary.
  *
- * Nothing is logged here, deliberately. The interesting failure to a user is "settings never arrived",
- * which is a property of the call and not of the payload, so the log line belongs at the RPC boundary where
- * the error object still exists. A helper that writes to console is also a helper that cannot be tested
- * without a spy on every case.
+ * The per-key case is the one that matters most in practice, and it is the reason the hook takes a reason
+ * string rather than a boolean: a wrong-typed value is a toggle the user set and this code is discarding,
+ * which looks from the outside exactly like the feature being broken. It names the keys.
+ *
+ * Deliberately narrow, and worth knowing why: the backend already logs its own encode failure and answers
+ * "{}", so the likely real-world fault is covered on the Lua side. What is left for this to catch is
+ * IPC-level corruption and a wrong-typed key that survived encode -- so the hook is a reason string, not a
+ * structured report.
+ *
+ * An unknown key is not reported. It is what a payload from a newer or older build of the plugin looks like,
+ * and normalizeSettings ignoring it is the compatibility behaviour rather than a fault.
  */
-export function parseSettings(raw: unknown): PluginSettings {
-	if (typeof raw !== 'string' || raw.trim() === '') return { ...DEFAULT_SETTINGS };
-	try {
-		return normalizeSettings(JSON.parse(raw));
-	} catch {
+export function parseSettings(raw: unknown, onProblem?: (reason: string) => void): PluginSettings {
+	if (typeof raw !== 'string') {
+		report(onProblem, `payload was ${jsonKind(raw)}, not a JSON string`);
 		return { ...DEFAULT_SETTINGS };
 	}
+
+	if (raw.trim() === '') return { ...DEFAULT_SETTINGS };
+
+	let decoded: unknown;
+	try {
+		decoded = JSON.parse(raw);
+	} catch {
+		report(onProblem, 'payload is not valid JSON');
+		return { ...DEFAULT_SETTINGS };
+	}
+
+	if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
+		report(onProblem, `payload decoded to ${jsonKind(decoded)}, not an object`);
+		return { ...DEFAULT_SETTINGS };
+	}
+
+	// Read from the decoded object rather than asking normalizeSettings what it changed, so that function keeps
+	// the signature every other caller already uses. `key in source` and not a truthiness check: a key that is
+	// absent is a default, which is normal, and only a key that is present with the wrong type is a value being
+	// thrown away.
+	const source = decoded as Record<string, unknown>;
+	const discarded = SETTING_KEYS.filter((key) => key in source && typeof source[key] !== 'boolean');
+	if (discarded.length > 0) {
+		report(onProblem, `discarded non-boolean value for: ${discarded.join(', ')}`);
+	}
+
+	return normalizeSettings(decoded);
 }
