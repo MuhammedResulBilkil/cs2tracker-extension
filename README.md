@@ -1,4 +1,4 @@
-<img src="assets/icon-mono.svg" alt="" width="28" align="left">
+<img src="assets/icon-tile.svg" alt="" width="28" align="left">
 
 # CS2Tracker Extension
 
