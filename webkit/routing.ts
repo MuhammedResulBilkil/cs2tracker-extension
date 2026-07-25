@@ -1,3 +1,4 @@
+import type { PluginSettings } from '../shared/settings';
 import { registerDisposer } from './lifecycle';
 
 /**
@@ -53,6 +54,49 @@ export function isSteamCommunityHost(hostname: string): boolean {
 /** True for a community profile path. Pass `location.pathname`. */
 export function isProfilePath(pathname: string): boolean {
 	return PROFILE_PATH_PATTERN.test(pathname);
+}
+
+/** Which of the two injections a page should get. */
+export interface InjectionPlan {
+	profileButton: boolean;
+	friendBadges: boolean;
+}
+
+/**
+ * Decide which injections this page gets, from the settings and the path.
+ *
+ * This is the mapping from a user's two toggles to the two features they name, and it is here rather than
+ * inline in the entry because it was the last decision in the bundle that no test could reach. The entry
+ * imports @steambrew/webkit transitively and so cannot be imported by the suite at all, which meant the
+ * mapping could be wrong in the one way that costs nothing to write and everything to ship: exchange the two
+ * keys and the whole suite still passes, CI stays green, and every user's "Show on profile pages" toggle
+ * silently operates the friend badges while "Show on friend lists" operates the profile button. Nothing
+ * throws, nothing looks broken, and each toggle appears to work -- on the wrong feature. Moving it here is
+ * what makes tests/webkit-entry.test.ts able to state which key gates which feature.
+ *
+ * The asymmetry is the other half of what is worth pinning, and it is deliberate rather than an oversight in
+ * one of the two branches:
+ *
+ * **The profile button is path-gated.** `.profile_rightcol` exists on profile pages and nowhere else, so a
+ * waiter armed on any other page could only run its observer over Steam's mutations for fifteen seconds and
+ * then log a line about a selector that was never going to match.
+ *
+ * **The badges are not.** Friend rows are the same `.friend_block_v2[data-steamid]` markup on /friends/,
+ * /friends/coplay/, /friends/pending/, /friends/blocked/, group member listings and the friends widget on a
+ * profile, so gating them on a path would mean enumerating Steam's surfaces and being wrong about one of
+ * them -- silently, as a page that simply never gets badges. The injector's own row selector is the gate
+ * instead: a page with no friend rows costs one query and is left untouched, down to the stylesheet.
+ *
+ * `openExternal` is deliberately absent. It selects which browser a link opens in, so it belongs to the
+ * injectors' arguments and not to this decision; if it ever appeared here it would be gating a feature on a
+ * setting that has nothing to say about whether that feature should exist. tests/webkit-entry.test.ts pins
+ * that both plans are indifferent to it.
+ */
+export function plannedInjection(settings: PluginSettings, pathname: string): InjectionPlan {
+	return {
+		profileButton: settings.showOnProfiles && isProfilePath(pathname),
+		friendBadges: settings.showOnFriendLists,
+	};
 }
 
 /**

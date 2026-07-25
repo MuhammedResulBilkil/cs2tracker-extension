@@ -60,13 +60,28 @@ Restart Steam and enable the plugin under **Millennium → Plugins**.
 | Show on friend lists | On | Adds a badge to each friend row |
 | Open in external browser | Off | Opens CS2Tracker in your system browser instead of Steam's built-in one |
 
-Profile pages you already have open keep their old settings. Reopen them to apply a change.
+Profile pages you already have open keep their old settings. Reopen them to apply a change. The same
+applies to switching the plugin off: pages that are already open keep the button and badges until you
+close or reload them.
 
 ## How it works
 
 The plugin runs in three places. A Lua backend stores your settings and resolves custom URL names to Steam IDs. A React panel inside Steam's own UI renders the settings and the lookup box using Steam's component library. A webkit bundle runs inside Steam's community browser and does the actual page injection, reading each profile's Steam ID from the page rather than from your own account.
 
-It sends no data anywhere, and it has no server, no analytics and no telemetry of its own. The only host it ever talks to is Steam, for two things: reading the Steam ID of a profile page you are already looking at, and resolving a custom URL name you type into the lookup box. Nothing else leaves your machine.
+## Privacy
+
+Two separate questions, because they have different answers and both matter.
+
+**What the plugin sends by itself.** Nothing, to anybody but Steam. There is no CS2Tracker Extension server, no analytics and no telemetry, and the plugin makes exactly two requests of its own — both to `steamcommunity.com`:
+
+- the current page's `?xml=1` view, while working out whose profile you are looking at;
+- `steamcommunity.com/id/<name>/?xml=1`, when you type a custom URL name into the lookup box.
+
+Your settings are stored on your machine by Millennium. The buttons and badges are built locally, and putting one on a page contacts nothing.
+
+**Where the links go.** Every CS2Tracker link contains the SteamID64 of the player it is about, so opening one sends that ID to `cs2tracker.gg` — that is how the site knows whose stats to show, and it is the whole point of the plugin. Clicking the profile button, a friend-list badge, or a lookup result therefore tells CS2Tracker which player you just looked up. Pressing **My profile** sends your own SteamID64.
+
+This happens only when you click. Nothing is sent in the background, no page you leave alone reports anything, and CS2Tracker is never contacted until you open a link. CS2Tracker is a third party: what it does with a request it receives is governed by its policies, not by this plugin.
 
 ## Development
 
@@ -75,9 +90,16 @@ pnpm install
 pnpm run dev        # one-off development build
 pnpm run watch      # rebuild on change
 pnpm run build      # production build
-pnpm run typecheck  # type check both bundles
+pnpm run typecheck  # type check the frontend and webkit bundles
 pnpm test           # run the test suite
 ```
+
+`pnpm run typecheck` is one of three typecheck commands, and it does not subsume the other two — the
+frontend and webkit bundles are compiled as separate programs there, the root project is the only one
+that reaches `tests/`, and `scripts/` is checked under Node's types alone. Before opening a pull
+request, run the full set of gates listed in
+[CONTRIBUTING.md](CONTRIBUTING.md#before-you-open-a-pull-request); the commands above are for working,
+not for verifying.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design notes and [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 

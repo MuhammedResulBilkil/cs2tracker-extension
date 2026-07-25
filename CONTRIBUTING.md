@@ -80,15 +80,23 @@ trailing period, and describing the change from a user's point of view where the
 
 ## Before you open a pull request
 
-All four of these must pass. CI runs them and will not let a red branch merge, but running them
-locally is faster than finding out from a workflow.
+Every one of these must pass. They are the complete set of gates CI applies, in the order it applies
+them — CI will not let a red branch merge, but running them locally is faster than finding out from a
+workflow.
 
 ```bash
-pnpm run typecheck
-pnpm exec tsc -p tsconfig.json --noEmit
-pnpm exec tsc -p scripts/tsconfig.json --noEmit
+pnpm run typecheck                               # frontend and webkit, as separate programs
+pnpm exec tsc -p tsconfig.json --noEmit          # the root project — the only one that reaches tests/
+pnpm exec tsc -p scripts/tsconfig.json --noEmit  # the build scripts, under Node's types alone
+pnpm exec tsx scripts/sync-version.ts --check    # package.json and plugin.json agree on the version
 pnpm test
+pnpm run build
 ```
+
+After the build, CI additionally asserts that `.millennium/Dist/index.js`,
+`.millennium/Dist/webkit.js` and `backend/main.lua` are all non-empty, and that `plugin.json` still
+carries `name`, `common_name`, `version`, `backendType` and `webkitApiVersion`. Those are smoke tests
+for the store's own pipeline; a successful local `pnpm run build` covers the same ground.
 
 **Run all three typechecks.** No one of them subsumes the others, and it is not obvious why —
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#three-typecheck-commands-and-why-no-one-of-them-subsumes-the-others)
@@ -97,8 +105,8 @@ separate programs with different ambient types, which is the only way a cross-ru
 caught; the root project is the only one that reaches `tests/`, which matters because vitest strips
 types without checking them; and the third covers `scripts/`, which nothing else includes.
 
-Also run `pnpm run build` if you touched anything the bundler sees. A change can typecheck and still
-fail to bundle.
+`pnpm run build` is in the list rather than a footnote to it: a change can typecheck and still fail to
+bundle, and the store's CI runs `pnpm install && pnpm run build` as its first act.
 
 ### New behaviour needs a test
 
@@ -146,7 +154,9 @@ just the badge.
 - One logical change per pull request.
 - Say what you verified by hand, using the checklist above where it applies.
 - Line endings are LF. `.gitattributes` enforces it; do not fight it.
-- Formatting follows the existing files: tabs for indentation, single quotes in TypeScript.
+- Formatting follows the existing files, and indentation is per-language rather than repo-wide: tabs in
+  TypeScript, four spaces in `backend/main.lua`, four spaces in the workflow YAML. Match the file you
+  are editing. Single quotes in TypeScript.
 - Comments in this codebase explain *why*, and especially why something that looks removable is not.
   If your change makes one of them wrong, fix the comment in the same commit. If you find yourself
   deleting one because the rule looks arbitrary, check `docs/ARCHITECTURE.md` first — several of them

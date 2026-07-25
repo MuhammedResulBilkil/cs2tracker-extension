@@ -27,11 +27,20 @@ export function normalizeSettings(raw: unknown): PluginSettings {
 /**
  * Names a decoded JSON value in a reason string. `typeof` alone is not enough: it answers "object" for both
  * null and an array, which are the two shapes a hand-written guard most often lets through.
+ *
+ * null and undefined are named bare, without an article, because they are values rather than kinds --
+ * "payload was undefined" is the sentence, not "payload was an undefined". Everything else takes an article
+ * chosen by the initial letter: `typeof` yields "object" and "undefined" among its answers, and a fixed "a"
+ * produced "a object" and "a undefined" in a message whose whole job is to be read by a human at the moment
+ * something has gone wrong. Both were reachable -- `parseSettings({})` and `parseSettings(undefined)` are the
+ * two commonest things a broken IPC channel hands back.
  */
 function jsonKind(value: unknown): string {
 	if (value === null) return 'null';
+	if (value === undefined) return 'undefined';
 	if (Array.isArray(value)) return 'an array';
-	return `a ${typeof value}`;
+	const kind = typeof value;
+	return `${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}`;
 }
 
 /**

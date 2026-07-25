@@ -304,10 +304,16 @@ would be an assertion dressed as a type.
 
 ### Network surface
 
-The README makes a privacy claim on the store listing, so the full list of requests this plugin can
-make belongs here where it can be checked against. There are exactly two, both to
-`steamcommunity.com`, and there is no third-party host, no analytics endpoint and no server belonging
-to this plugin:
+The README makes a privacy claim on the store listing, so the full list of hosts this plugin can cause
+traffic to belongs here where it can be checked against. There are three, and they are not all the
+same kind of thing — which is exactly the distinction the README has to draw and an earlier version of
+this file got wrong.
+
+| # | Host | What reaches it | Kind |
+|---|---|---|---|
+| 1 | `steamcommunity.com` | a vanity name the user typed | a request this plugin makes |
+| 2 | `steamcommunity.com` | the current page's own URL | a request this plugin makes |
+| 3 | `cs2tracker.gg` | the SteamID64 of the player the user asked about | **user-initiated navigation, not a plugin request** |
 
 1. **`ResolveVanity` in `backend/main.lua`** fetches `https://steamcommunity.com/id/<vanity>/?xml=1`
    when the user types a custom URL name into the lookup box. The vanity is validated against
@@ -319,11 +325,27 @@ to this plugin:
    than user-initiated, and because it is conditional: it is step 3 of 4, so it runs only when the URL
    and `g_rgProfileData` have both missed and the document is a profile root. On a `/profiles/<id>/`
    URL step 1 always wins and this never fires.
+3. **`https://cs2tracker.gg/stats/<steamid64>`**, from `CS2TRACKER_PROFILE_BASE` in
+   `shared/cs2tracker.ts` and therefore present in both bundles. This is the destination of every link
+   the plugin builds: the profile button (`webkit/inject-profile.ts`), each friend-row badge
+   (`webkit/inject-friendblocks.ts`), and the panel's lookup and **My profile** buttons
+   (`frontend/services/steamid.ts`). In the **My profile** case the id is the *signed-in user's own*,
+   read from `App.m_CurrentUser.strSteamID`.
 
-Anything claiming the plugin makes only one request is wrong, and the second one is the reason. Both
-requests concern a profile the user is already looking at or has explicitly asked about, which is what
-makes the "sends no data anywhere" claim in the README true — but the honest phrasing is about *which
-host* and *what for*, not about a count.
+Rows 1 and 2 are requests this code issues. Row 3 is **not a request this plugin makes** — it is a URL
+handed to Steam or to the system browser when the user clicks, so the navigation is the user's and the
+plugin never fetches from `cs2tracker.gg` itself. Building a button contacts nothing; the id travels
+only when a link is opened.
+
+That distinction is worth keeping precise, and it is emphatically not a reason to leave it out of the
+store listing. Opening a link tells a third party which player the user looked up, and in one case
+which player *they* are. A listing that says "sends no data anywhere" is false whatever the mechanism,
+so the README states both axes separately: what the plugin requests, and where its links go. There is
+no analytics endpoint and no server belonging to this plugin — that part was always true and is worth
+saying — but it is a different claim from "nothing leaves your machine", and only the first one is
+defensible.
+
+Anything claiming the plugin makes only one request is also wrong, and row 2 is the reason.
 
 ## Store review rules the code is shaped by
 
@@ -336,17 +358,45 @@ changed how something here is written:
   `SettingsPanel.tsx` is the whole of its layout. The one inline style in the frontend bundle is on
   the SVG mark in `frontend/assets/Icon.tsx`, which pins the icon to `1em` square with
   `flexShrink: 0`; it sizes the plugin's own glyph and styles nothing of Steam's.
-- **No `innerHTML` with interpolated values.** Injection builds elements with `createElement` and
-  sets `textContent`. The one place markup is parsed is the SVG icon, through `DOMParser` on a static
-  string with nothing interpolated into it.
+- **No `innerHTML` with interpolated values.** Injection builds elements with `createElement` and sets
+  `textContent`. Markup is parsed in exactly two places, and both are `DOMParser` rather than
+  `innerHTML`:
+  - `webkit/icon.ts` parses the SVG mark — a static string constant with nothing interpolated into it.
+  - `webkit/steamid.ts` parses the body of the `?xml=1` response in `fromProfileXml`. This is the one
+    that matters to a reviewer, because its input is a **network response** rather than a constant, so
+    it is named here rather than left to be discovered. It is safe for three reasons that hold
+    together: the parse is `application/xml` into a detached document that is never connected, so
+    nothing in it executes or renders; the only thing read out of it is
+    `querySelector('steamID64')?.textContent`, a text node and not markup; and that text is then
+    range-checked by `isSteamId64` before it can become part of a URL, so a response containing
+    anything other than a well-formed SteamID64 yields `null`. No node from the parsed document is
+    ever inserted into the page.
 - **No CDP injection machinery.** No debugger-protocol tricks to reach the page; the webkit bundle is
   the supported mechanism and is the only one used.
 - **No deprecated Millennium APIs.**
-- **Every observer, listener and timer disposed.** A `MutationObserver` left connected outlives the
-  page it was watching, so `webkit/lifecycle.ts` is a disposer registry and every observer, timer and
-  listener registers with it. `disposeAll` runs each disposer at most once, most recent first,
+- **Every observer, listener and timer disposed — on page unload.** A `MutationObserver` left connected
+  outlives the page it was watching, so `webkit/lifecycle.ts` is a disposer registry and every observer,
+  timer and listener registers with it. `disposeAll` runs each disposer at most once, most recent first,
   popping before calling so a thrower cannot be re-run, with the `try`/`catch` inside the loop so one
   failure cannot strand the rest.
+
+  **The trigger is the limit, and it is worth stating rather than implying.** The only path into
+  `teardown()` is the non-persisted `pagehide` listener armed in `webkit/index.tsx`. That covers the
+  case the store review is asking about — a page going away does not leave anything of this plugin's
+  running behind it — and it does not cover the plugin being *disabled*. `@steambrew/webkit` exports no
+  unload or disable hook, so there is nothing for the webkit bundle to listen for: Millennium can stop
+  loading the bundle into new documents, but it cannot tell an already-loaded one to stand down.
+
+  So disabling the plugin with a friends page open leaves that page as it was — the badges, the profile
+  button, the `<style>` element, the `pagehide` listener, and a **connected `MutationObserver` that
+  keeps re-badging rows Steam adds**. Closing or reloading the page clears all of it, and this is
+  recorded as an API limitation rather than a defect because there is no hook to attach a fix to; do not
+  add a polling loop or a heartbeat to work around it, which would trade a bounded gap for an unbounded
+  cost on every community page. Revisit if `@steambrew/webkit` gains an unload hook.
+
+  This is the same shape as the settings model's "a toggle applies to the next page, not the ones
+  already open", and for the same underlying reason: the webkit bundle's only lifecycle is the
+  document's.
 
 `webkit/teardown.ts` exists as its own module for two reasons. It needs nothing from Steam — four
 removers and a `Document` — so splitting it out of the entry point is what makes it testable at all.

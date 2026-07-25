@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_SETTINGS, type PluginSettings } from '../shared/settings';
 import { disposeAll } from '../webkit/lifecycle';
-import { isProfilePath, isSteamCommunityHost, waitForElement } from '../webkit/routing';
+import { isProfilePath, isSteamCommunityHost, plannedInjection, waitForElement } from '../webkit/routing';
 
 /**
  * The entry point's testable half.
  *
  * WebkitMain imports @steambrew/webkit, which exists only inside the Steam client, so the entry itself is
  * verified by hand against a live client. Everything in it that carries a decision was pulled out into
- * webkit/routing.ts, which imports nothing but the disposer registry -- that split is the whole reason the
- * module exists, and anything this file cannot reach is a sign more should have moved into it.
+ * webkit/routing.ts, which imports nothing but the disposer registry and shared/settings -- that split is the
+ * whole reason the module exists, and anything this file cannot reach is a sign more should have moved into
+ * it. The settings-to-feature mapping is the most recent thing to move: it was the last decision in the
+ * bundle that lived only in the entry, and the one whose failure mode was cheapest to introduce.
  */
 
 /**
@@ -99,6 +102,100 @@ describe('isProfilePath', () => {
 		expect(isProfilePath('/friends/')).toBe(false);
 		expect(isProfilePath('/idols/example')).toBe(false);
 		expect(isProfilePath('/profiles/')).toBe(false);
+	});
+});
+
+/**
+ * The mapping from the user's two toggles to the two features they name.
+ *
+ * This is the decision the suite could not reach until it was extracted, and the reason it was worth
+ * extracting is the shape of its failure: exchanging the two keys type-checks, reads correctly in review, and
+ * leaves both toggles apparently working -- on each other's feature. So the cases below are chosen to fail on
+ * exactly that, which takes asymmetric settings. With both toggles equal a swap is invisible by construction:
+ * on /friends/ with both on, the correct mapping and the swapped one both answer
+ * `{ profileButton: false, friendBadges: true }`.
+ */
+const settingsWith = (overrides: Partial<PluginSettings>): PluginSettings => ({ ...DEFAULT_SETTINGS, ...overrides });
+
+const PROFILE_PATH = '/id/intkira/';
+
+describe('plannedInjection', () => {
+	it('plans both injections when both toggles are on and the page is a profile', () => {
+		expect(plannedInjection(settingsWith({ showOnProfiles: true, showOnFriendLists: true }), PROFILE_PATH)).toEqual({
+			profileButton: true,
+			friendBadges: true,
+		});
+	});
+
+	it('plans nothing when both toggles are off', () => {
+		expect(plannedInjection(settingsWith({ showOnProfiles: false, showOnFriendLists: false }), PROFILE_PATH)).toEqual({
+			profileButton: false,
+			friendBadges: false,
+		});
+	});
+
+	/**
+	 * The one that catches the key swap, and the reason it asserts both directions rather than one: a mapping
+	 * that read `showOnFriendLists` for the button and `showOnProfiles` for the badges would answer this
+	 * exactly inverted. Either direction alone could be satisfied by a function that ignored one key
+	 * altogether, so both are required to pin that each key reaches its own feature and only its own.
+	 */
+	it('gates the profile button on showOnProfiles and the badges on showOnFriendLists', () => {
+		expect(plannedInjection(settingsWith({ showOnProfiles: true, showOnFriendLists: false }), PROFILE_PATH)).toEqual({
+			profileButton: true,
+			friendBadges: false,
+		});
+		expect(plannedInjection(settingsWith({ showOnProfiles: false, showOnFriendLists: true }), PROFILE_PATH)).toEqual({
+			profileButton: false,
+			friendBadges: true,
+		});
+	});
+
+	/**
+	 * The asymmetry, stated as one claim per page so a reader can see which surface each half is about.
+	 *
+	 * `.profile_rightcol` exists on profile pages and nowhere else, so arming the waiter elsewhere could only
+	 * expire. Friend rows are the same markup across every friends surface and the friends widget on a
+	 * profile, so path-gating the badges would mean enumerating Steam's surfaces and being wrong about one --
+	 * which shows up as a page that silently never gets badges, not as an error. /friends/ is the case that
+	 * pins both halves at once: it is the page the badges exist for and is not a profile path.
+	 */
+	it('path-gates the profile button, and does not path-gate the badges', () => {
+		const both = settingsWith({ showOnProfiles: true, showOnFriendLists: true });
+
+		expect(plannedInjection(both, '/friends/')).toEqual({ profileButton: false, friendBadges: true });
+		expect(plannedInjection(both, '/friends/coplay/')).toEqual({ profileButton: false, friendBadges: true });
+		expect(plannedInjection(both, '/groups/example')).toEqual({ profileButton: false, friendBadges: true });
+		expect(plannedInjection(both, '/')).toEqual({ profileButton: false, friendBadges: true });
+	});
+
+	// A profile sub-page follows isProfilePath rather than a rule of its own, so the button is planned there
+	// too and the column is left to be the real gate. Pinned so that tightening isProfilePath stays a decision.
+	it('plans the button on a profile sub-page, as isProfilePath does', () => {
+		const both = settingsWith({ showOnProfiles: true, showOnFriendLists: true });
+		expect(plannedInjection(both, '/id/intkira/games/')).toEqual({ profileButton: true, friendBadges: true });
+	});
+
+	/**
+	 * openExternal chooses which browser a link opens in. It has nothing to say about whether either feature
+	 * should be injected, so it is passed to the injectors and not to this function -- and a plan that moved
+	 * with it would be gating a feature on a setting about something else entirely.
+	 */
+	it('is indifferent to openExternal', () => {
+		for (const pathname of [PROFILE_PATH, '/friends/']) {
+			expect(plannedInjection(settingsWith({ openExternal: true }), pathname)).toEqual(
+				plannedInjection(settingsWith({ openExternal: false }), pathname),
+			);
+		}
+	});
+
+	// The shipped defaults, so a change to them shows up here as well as in tests/settings.test.ts: both
+	// features default on, which is what makes a fresh install do something on a profile page.
+	it('plans both injections under the shipped defaults', () => {
+		expect(plannedInjection({ ...DEFAULT_SETTINGS }, PROFILE_PATH)).toEqual({
+			profileButton: true,
+			friendBadges: true,
+		});
 	});
 });
 

@@ -131,11 +131,30 @@ describe('parseSettings', () => {
 		}
 	});
 
-	// The defaults are frozen, so handing the caller a reference rather than a copy would make a settings
-	// object that silently refuses assignment.
-	it('returns a fresh object each time', () => {
+	/**
+	 * The defaults are frozen, so handing the caller a reference rather than a copy would make a settings
+	 * object that silently refuses assignment -- and outside strict mode the assignment is dropped without a
+	 * word, so a caller's override would look applied and not be.
+	 *
+	 * Every exit is listed by hand, and that is the point rather than thoroughness for its own sake. There are
+	 * five, `toEqual(DEFAULT_SETTINGS)` passes for the frozen object itself, and identity is invisible to every
+	 * other assertion in this file -- so replacing `{ ...DEFAULT_SETTINGS }` with `DEFAULT_SETTINGS` at any one
+	 * of them used to survive the whole suite. One input per exit: 42 is the non-string branch, '' the blank
+	 * branch, 'nope' the JSON-failure branch, 'null' the decoded-to-something-else branch, and '{}' the normal
+	 * path through normalizeSettings.
+	 */
+	it('returns a fresh object from every exit, never the frozen defaults', () => {
+		expect(parseSettings(42)).not.toBe(DEFAULT_SETTINGS);
+		expect(parseSettings('')).not.toBe(DEFAULT_SETTINGS);
+		expect(parseSettings('nope')).not.toBe(DEFAULT_SETTINGS);
+		expect(parseSettings('null')).not.toBe(DEFAULT_SETTINGS);
+		expect(parseSettings('{}')).not.toBe(DEFAULT_SETTINGS);
+	});
+
+	// Identity is not quite the whole claim: the object also has to be writable, which is what a caller
+	// spreading or adjusting the result depends on.
+	it('returns an object the caller can write to', () => {
 		const first = parseSettings('nope');
-		expect(first).not.toBe(DEFAULT_SETTINGS);
 		first.openExternal = true;
 		expect(parseSettings('nope').openExternal).toBe(false);
 	});
@@ -170,6 +189,27 @@ describe('parseSettings problem reporting', () => {
 		const onArray = vi.fn();
 		parseSettings('[]', onArray);
 		expect(onArray.mock.calls[0][0]).toContain('array');
+	});
+
+	/**
+	 * The reason string is prose a human reads at the moment something is already wrong, so it has to parse as
+	 * English. A single hardcoded article gave "a undefined" and "a object" -- and both are reachable, since an
+	 * absent payload and an already-decoded one are the two commonest things a broken IPC channel returns.
+	 */
+	it('names what arrived in readable English, whatever arrived', () => {
+		const reasonFor = (raw: unknown): string => {
+			const onProblem = vi.fn();
+			parseSettings(raw, onProblem);
+			return String(onProblem.mock.calls[0][0]);
+		};
+
+		expect(reasonFor(undefined)).toContain('undefined');
+		expect(reasonFor(undefined)).not.toContain('a undefined');
+		expect(reasonFor({ openExternal: true })).toContain('an object');
+		expect(reasonFor(42)).toContain('a number');
+		expect(reasonFor(true)).toContain('a boolean');
+		expect(reasonFor('7')).toContain('a number');
+		expect(reasonFor('"openExternal"')).toContain('a string');
 	});
 
 	it('reports a non-blank payload that is not valid JSON', () => {

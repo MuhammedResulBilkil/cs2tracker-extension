@@ -136,6 +136,38 @@ describe('parseLookupInput', () => {
 		expect(parseLookupInput('https://steamcommunity.com.evil.example/id/admin')).toEqual({ kind: 'invalid' });
 	});
 
+	/**
+	 * This function's input is whatever the user typed or pasted into the lookup box, and a hostname is
+	 * case-insensitive by definition -- so a URL that arrives as `SteamCommunity.com` is the same URL. Without
+	 * the `i` flag on both patterns it fell through to the bare-vanity test, failed that too on the `/` and
+	 * `:` characters, and came back invalid: the plugin telling the user that a valid profile URL is not one.
+	 *
+	 * The scheme and the path segment are folded by the same flag, so they are pinned here as well. What is
+	 * deliberately *not* folded is the captured text: a mixed-case vanity has to reach ResolveVanity spelled
+	 * the way it was typed, which the last case checks.
+	 */
+	it('accepts a URL whose host, scheme, or path segment is mixed-case', () => {
+		expect(parseLookupInput('https://SteamCommunity.com/id/foo/')).toEqual({ kind: 'vanity', value: 'foo' });
+		expect(parseLookupInput('https://SteamCommunity.com/profiles/76561198145891996')).toEqual({
+			kind: 'steamid64',
+			value: '76561198145891996',
+		});
+		expect(parseLookupInput('HTTPS://WWW.STEAMCOMMUNITY.COM/ID/foo')).toEqual({ kind: 'vanity', value: 'foo' });
+		expect(parseLookupInput('SteamCommunity.com/Profiles/76561198145891996')).toEqual({
+			kind: 'steamid64',
+			value: '76561198145891996',
+		});
+		expect(parseLookupInput('https://steamcommunity.com/id/IntKira')).toEqual({ kind: 'vanity', value: 'IntKira' });
+	});
+
+	// Folding case must not fold the host boundary: `i` is about spelling, and every lookalike rejected above
+	// stays rejected in any capitalisation.
+	it('still rejects lookalike hosts in mixed case', () => {
+		expect(parseLookupInput('https://EVIL.example/SteamCommunity.com/id/admin')).toEqual({ kind: 'invalid' });
+		expect(parseLookupInput('https://SteamCommunity.com.evil.example/id/admin')).toEqual({ kind: 'invalid' });
+		expect(parseLookupInput('https://Evil-SteamCommunity.com/id/admin')).toEqual({ kind: 'invalid' });
+	});
+
 	it('rejects empty input and anything with unsafe characters', () => {
 		expect(parseLookupInput('')).toEqual({ kind: 'invalid' });
 		expect(parseLookupInput('   ')).toEqual({ kind: 'invalid' });

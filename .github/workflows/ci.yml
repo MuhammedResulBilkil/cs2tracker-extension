@@ -78,9 +78,19 @@ jobs:
             # a push instead of during store review. `-s` rather than `-f`: a
             # bundler that exits 0 having written nothing is the failure worth
             # catching.
+            #
+            # webkitApiVersion is in the key list for a reason the other four are
+            # not: its absence is the hardest failure in this project to
+            # diagnose. Millennium simply never loads webkit.js — nothing
+            # errors, the settings panel still appears and its toggles still
+            # persist, and no button is injected into any page. That reads
+            # exactly like a selector bug and sends you into
+            # webkit/inject-profile.ts looking for a fault that is in the
+            # manifest. See docs/ARCHITECTURE.md, "plugin.json must declare
+            # webkitApiVersion".
             - name: Verify build output
               run: |
                   test -s .millennium/Dist/index.js
                   test -s .millennium/Dist/webkit.js
                   test -s backend/main.lua
-                  node -e "const p=require('./plugin.json'); for (const k of ['name','common_name','version','backendType']) if (!p[k]) throw new Error('plugin.json is missing '+k);"
+                  node -e "const p=require('./plugin.json'); for (const k of ['name','common_name','version','backendType','webkitApiVersion']) if (!p[k]) throw new Error('plugin.json is missing '+k);"

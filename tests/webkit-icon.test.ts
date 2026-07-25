@@ -1,5 +1,36 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CS2TRACKER_ICON_SVG, createIcon } from '../webkit/icon';
+
+/**
+ * webkit/icon.ts inlines assets/icon.svg as a string constant, because the webkit bundle has no loader and
+ * no fetch it could use to read a file. So the mark exists twice, and the copy can drift from its source in
+ * silence -- a mistyped coordinate, a dropped path, a re-cropped viewBox all still render something
+ * icon-shaped.
+ *
+ * That drift had a specific shape worth naming. tests/frontend-icon.test.ts pins the frontend's
+ * transcription against this same asset, so a future `pnpm run trace-icon` that regenerates it fails that
+ * suite loudly -- while this constant, checked only for a path count and a viewBox, would have kept the old
+ * mark without a word. The two mount points would then draw different marks: the settings panel the new
+ * one, every injected button and badge the old one.
+ *
+ * fileURLToPath is given a string, not a URL object: the happy-dom test environment replaces the global URL
+ * constructor, and Node rejects the resulting foreign instance. Same reason as the frontend suite.
+ */
+const ASSET_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'icon.svg');
+const ASSET = readFileSync(ASSET_PATH, 'utf8');
+
+/**
+ * The documented conversion, applied here so the test performs it rather than restating its result: the
+ * constant is exactly the asset with the newline between each element removed, and nothing else.
+ *
+ * Line endings are normalised first. `.gitattributes` checks this repository out with LF, so the replace
+ * below is all that is needed today -- but a checkout that ignored it would otherwise fail this test for
+ * the wrong reason, reporting a drifted mark when the only difference is a carriage return.
+ */
+const FLATTENED_ASSET = ASSET.replace(/\r\n/g, '\n').replace(/\n/g, '');
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -13,10 +44,34 @@ describe('CS2TRACKER_ICON_SVG', () => {
 	});
 
 	/**
+	 * The whole constant against the whole asset, in one assertion: every coordinate, every fill, the
+	 * viewBox, the element order and the namespace declaration. This is the check that makes a regenerated
+	 * asset fail here as loudly as it already fails tests/frontend-icon.test.ts, instead of leaving this
+	 * copy silently stale.
+	 *
+	 * It also documents the conversion by performing it. If the flattening rule ever stops being "delete
+	 * the newlines" -- a formatter wrapping the path data, say -- this fails and the docblock on the
+	 * constant has to be rewritten with it, which is the correct outcome rather than a nuisance.
+	 */
+	it('is the asset, flattened, byte for byte', () => {
+		expect(CS2TRACKER_ICON_SVG).toBe(FLATTENED_ASSET);
+	});
+
+	// Guards the comparison above rather than the mark: if the asset were ever emptied or truncated to
+	// something with no shapes in it, `toBe` would still pass against an equally empty constant.
+	it('compares against an asset that actually holds the mark', () => {
+		expect(ASSET).toContain('<svg');
+		expect(ASSET).toContain('</svg>');
+		expect(ASSET.match(/<path/g)).toHaveLength(5);
+	});
+
+	/**
 	 * The mark's arcs share an off-centre origin at (22.62, 22.62) of a 0 0 40 40 box, so the viewBox is
-	 * geometry, not packaging: re-cropping it to something centred or square shifts the whole mark. The
-	 * path count is pinned here as well as in the asset-vs-source check so a dropped or merged path fails
-	 * in CI rather than only when somebody remembers to re-run the command.
+	 * geometry, not packaging: re-cropping it to something centred or square shifts the whole mark.
+	 *
+	 * Kept alongside the byte comparison above rather than folded into it, because the two fail with
+	 * different messages and one of them is a diagnosis. A regenerated asset fails `toBe` with a diff of two
+	 * 700-character strings; a dropped path or an edited viewBox fails here, naming which of the two it was.
 	 */
 	it('keeps the traced geometry: the off-centre viewBox and all five paths', () => {
 		expect(CS2TRACKER_ICON_SVG).toContain('viewBox="0 0 40 40"');

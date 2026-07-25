@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	LOOKUP_HINT,
@@ -339,17 +342,60 @@ describe('LOOKUP_MESSAGES', () => {
 	});
 });
 
+/**
+ * The backend's HTTP timeout, read out of the Lua source rather than restated here.
+ *
+ * tests/settings-sync.test.ts set this precedent for the same reason it applies again: Lua cannot export to
+ * TypeScript, so a cross-file invariant either reads the other file or hardcodes the number it is supposed to
+ * be protecting. Hardcoding it makes the test pass for the wrong reason the moment the Lua value moves --
+ * change REQUEST_TIMEOUT_SECONDS to 20 and an assertion that says `> 10_000` keeps passing while the
+ * invariant it documents is broken, which is precisely the failure it exists to prevent.
+ *
+ * fileURLToPath is given a string, not a URL object: the happy-dom test environment replaces the global URL
+ * constructor, and Node rejects the resulting foreign instance.
+ */
+const LUA_SOURCE_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'backend', 'main.lua');
+
+/**
+ * Anchored to the start of a line with only horizontal whitespace allowed before `local`, so a
+ * commented-out copy of the statement -- which necessarily begins with `--` -- cannot be mistaken for the
+ * real one. Same anchoring, and the same reason, as the DEFAULT_SETTINGS reader in tests/settings-sync.test.ts.
+ */
+const TIMEOUT_ANCHOR = /^[ \t]*local[ \t]+REQUEST_TIMEOUT_SECONDS[ \t]*=[ \t]*(\d+)[ \t]*$/gm;
+
+/**
+ * Throws rather than falling back to a default, which is the whole point of reading the file at all. A
+ * reader that answered "10 seconds, probably" on a rename would turn this invariant back into the hardcoded
+ * assertion it replaced -- silently, and while still looking like a cross-file check.
+ */
+function backendTimeoutMs(): number {
+	const source = readFileSync(LUA_SOURCE_PATH, 'utf8');
+	const matches = [...source.matchAll(TIMEOUT_ANCHOR)];
+	if (matches.length !== 1) {
+		throw new Error(`expected exactly one \`local REQUEST_TIMEOUT_SECONDS = <n>\` statement, found ${matches.length}`);
+	}
+	return Number(matches[0][1]) * 1000;
+}
+
 describe('LOOKUP_TIMEOUT_MS', () => {
 	/**
-	 * It has to outlast the backend's own HTTP timeout, which backend/main.lua sets to 10 seconds. Give up
-	 * sooner and the panel would report "Steam did not answer" while the backend was still inside a request
-	 * that was about to succeed -- and the retry the message invites would start the same ten seconds again.
+	 * It has to outlast the backend's own HTTP timeout, whatever backend/main.lua currently sets that to.
+	 * Give up sooner and the panel would report "Steam did not answer" while the backend was still inside a
+	 * request that was about to succeed -- and the retry the message invites would start the same wait again.
 	 *
 	 * The upper bound is a patience limit rather than a protocol one: past about half a minute a user has
-	 * concluded the plugin is broken, so there is no point waiting longer than they will.
+	 * concluded the plugin is broken, so there is no point waiting longer than they will. That one stays a
+	 * literal, because it is a fact about people and not about the backend.
 	 */
 	it('outlasts the backend HTTP timeout it is waiting on', () => {
-		expect(LOOKUP_TIMEOUT_MS).toBeGreaterThan(10_000);
+		expect(LOOKUP_TIMEOUT_MS).toBeGreaterThan(backendTimeoutMs());
 		expect(LOOKUP_TIMEOUT_MS).toBeLessThanOrEqual(30_000);
+	});
+
+	// The invariant above is only as good as this reader: a regex that matched nothing, or that quietly took
+	// the first of several statements, would compare against NaN or against the wrong number.
+	it('reads the backend timeout as a real number of milliseconds', () => {
+		expect(backendTimeoutMs()).toBeGreaterThan(0);
+		expect(Number.isFinite(backendTimeoutMs())).toBe(true);
 	});
 });

@@ -1,7 +1,7 @@
 import { observeFriendBlocks } from './inject-friendblocks';
 import { PROFILE_COLUMN_SELECTOR, injectProfileButton } from './inject-profile';
 import { registerDisposer } from './lifecycle';
-import { isProfilePath, isSteamCommunityHost, waitForElement } from './routing';
+import { isSteamCommunityHost, plannedInjection, waitForElement } from './routing';
 import { readSettings } from './settings';
 import { teardown } from './teardown';
 
@@ -61,9 +61,14 @@ export default async function WebkitMain(): Promise<void> {
 	const settings = await readSettings();
 	if (tornDown) return;
 
-	// Only the profile button is gated on the path. The right column exists on profile pages and nowhere else,
-	// so a wait armed anywhere else could only expire.
-	if (settings.showOnProfiles && isProfilePath(location.pathname)) {
+	// Which toggle gates which feature, and that only the profile button is path-gated, is decided in
+	// webkit/routing.ts rather than here. Both branches below read as obviously right either way round, which
+	// is the problem: exchanging the two keys is invisible in review, passes every test, and ships two toggles
+	// doing each other's job. Over there the suite can state the mapping; here there is nothing left to get
+	// wrong but the dispatch.
+	const plan = plannedInjection(settings, location.pathname);
+
+	if (plan.profileButton) {
 		waitForElement(document, PROFILE_COLUMN_SELECTOR, () => {
 			// void, not await: nothing here needs the result, and injectProfileButton is documented never to
 			// reject -- it answers false for every failure, including its own internal ones.
@@ -71,12 +76,7 @@ export default async function WebkitMain(): Promise<void> {
 		});
 	}
 
-	// Every community page, not just profiles. Friend rows are the same markup on /friends/,
-	// /friends/coplay/, /friends/pending/, /friends/blocked/, group member listings and the friends widget on
-	// a profile, so gating this on a path would mean enumerating Steam's surfaces and being wrong about one.
-	// The injector's own row selector is the gate: a page with no friend rows gets one query and is left
-	// untouched, down to the stylesheet.
-	if (settings.showOnFriendLists) {
+	if (plan.friendBadges) {
 		observeFriendBlocks(document, settings.openExternal);
 	}
 }
