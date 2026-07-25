@@ -1,0 +1,68 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly
+labels: [bug]
+body:
+    - type: input
+      id: plugin-version
+      attributes:
+          label: Plugin version
+          placeholder: 1.0.0
+      validations:
+          required: true
+
+    - type: input
+      id: millennium-version
+      attributes:
+          label: Millennium version
+          placeholder: 3.3.1
+      validations:
+          required: true
+
+    - type: dropdown
+      id: steam-channel
+      attributes:
+          label: Steam update channel
+          options: [Stable, Beta]
+      validations:
+          required: true
+
+    - type: dropdown
+      id: os
+      attributes:
+          label: Operating system
+          options: [Windows, Linux, macOS]
+      validations:
+          required: true
+
+    - type: textarea
+      id: steps
+      attributes:
+          label: Steps to reproduce
+          placeholder: |
+              1. Open a Steam community profile
+              2. ...
+      validations:
+          required: true
+
+    - type: textarea
+      id: expected
+      attributes:
+          label: What you expected to happen
+      validations:
+          required: true
+
+    - type: textarea
+      id: actual
+      attributes:
+          label: What actually happened
+      validations:
+          required: true
+
+    - type: textarea
+      id: logs
+      attributes:
+          label: Millennium log output
+          description: Paste anything the log shows around the failure. Remove personal information first.
+          render: text
+      validations:
+          required: false
