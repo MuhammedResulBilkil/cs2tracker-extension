@@ -42,14 +42,15 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
-            # Two typecheck passes, because neither subsumes the other. The
-            # package script compiles frontend and webkit as separate programs
-            # with their own `types` and `lib`, which is what keeps DOM globals
-            # out of the client bundle and @steambrew/client out of webkit. The
-            # root project is the only one that covers tests/ and scripts/ —
-            # vitest strips types through esbuild without checking them, so a
-            # test asserting against a mistyped API would otherwise pass
-            # forever.
+            # Three typecheck steps, because no one of them subsumes the rest.
+            # The package script compiles frontend and webkit as separate
+            # programs, each restricted to the ambient @types its runtime
+            # actually has — webkit to none, frontend to react. The root project
+            # sees every @types at once and so cannot catch a cross-runtime
+            # leak, but it is the only project that reaches tests/: vitest
+            # strips types through esbuild without checking them, so a test
+            # asserting against a mistyped API would otherwise compile and pass
+            # forever. The last step re-checks scripts/ under its own config.
             - name: Typecheck frontend and webkit
               run: pnpm run typecheck
 
@@ -67,10 +68,12 @@ jobs:
 
             # The store's own pipeline runs `pnpm install && pnpm run build` and
             # then expects these paths. Assert them here so a break surfaces on
-            # a push instead of during store review.
+            # a push instead of during store review. `-s` rather than `-f`: a
+            # bundler that exits 0 having written nothing is the failure worth
+            # catching.
             - name: Verify build output
               run: |
-                  test -f .millennium/Dist/index.js
-                  test -f .millennium/Dist/webkit.js
-                  test -f backend/main.lua
+                  test -s .millennium/Dist/index.js
+                  test -s .millennium/Dist/webkit.js
+                  test -s backend/main.lua
                   node -e "const p=require('./plugin.json'); for (const k of ['name','common_name','version','backendType']) if (!p[k]) throw new Error('plugin.json is missing '+k);"
