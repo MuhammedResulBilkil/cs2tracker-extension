@@ -2,11 +2,17 @@
  * Traces the CS2Tracker mark from its published raster into a true vector.
  *
  * The mark CS2Tracker ships as `cs2tracker.svg` is a base64 PNG in an `<svg>` wrapper — it
- * holds no path data at all. This script downloads the source raster, measures the geometry
- * out of it, emits `assets/icon.svg` as real arc paths, then rasterises that SVG back to the
- * source resolution and refuses to keep the result unless the two agree.
+ * holds no path data at all. This script downloads the source raster, measures the geometry out
+ * of it, builds the colour and monochrome variants from that one geometry, rasterises the colour
+ * variant back to the source resolution, and writes neither file unless the two agree.
  *
- * Nothing here is hand-tuned: every number in the emitted SVG comes from `measure()`.
+ * Measured from the raster: the shared arc centre, every radius, the radial-edge gap, and which
+ * quadrant each shape occupies. Assumed: that the mark is made of quarter-turn annulus sectors
+ * plus one three-quarter wedge, on radial edges parallel to the axes. Those spans are the model
+ * rather than a fit, and the pixel gate at the end is the evidence that the model holds — it is
+ * the only thing here that can fail. The three brand hexes below are transcribed from the source
+ * by eye; the script does not assert them against it.
+ *
  * Run it with `pnpm run trace-icon`.
  */
 
@@ -17,6 +23,7 @@ import sharp from 'sharp';
 
 const SOURCE_URL = 'https://cs2tracker.gg/images/home/cs2tracker-icon.png';
 const OUTPUT = fileURLToPath(new URL('../assets/icon.svg', import.meta.url));
+const OUTPUT_MONO = fileURLToPath(new URL('../assets/icon-mono.svg', import.meta.url));
 const MAX_MISMATCH_RATIO = 0.02;
 
 /** Side of the square viewBox the mark is emitted into. */
@@ -174,6 +181,18 @@ function edgesOf(
 	return edges;
 }
 
+/** Fewest edge points at one coordinate to count as a straight edge rather than an arc extreme. */
+const MIN_STRAIGHT_RUN = 80;
+/**
+ * Histogram buckets up to this far apart (px) are one straight edge. An edge landing near a pixel
+ * boundary splits its samples across two neighbouring coordinates, so the buckets must be merged.
+ */
+const BUCKET_MERGE = 2;
+/** A radial gap this wide (px) separates two distinct arcs of one component. */
+const ARC_SPLIT = 30;
+/** Edge points this close (px) to a detected straight edge are not arc samples. */
+const LINE_MARGIN = 2.5;
+
 /**
  * Axis-aligned straight edges, found as spikes in the coordinate histogram: a radial edge
  * contributes hundreds of points at one coordinate, while an arc's flattest extreme contributes
@@ -194,20 +213,13 @@ function straightEdges(edges: Edge[], axis: 'x' | 'y', minRun: number): number[]
 	let last = Number.NaN;
 	const flush = () => { if (run.length) lines.push(run.reduce((a, b) => a + b, 0) / run.length); };
 	for (const [key, values] of spikes) {
-		if (run.length && key - last > 2) { flush(); run = []; }
-		run.push(...values);
+		if (run.length && key - last > BUCKET_MERGE) { flush(); run = []; }
+		for (const value of values) run.push(value);
 		last = key;
 	}
 	flush();
 	return lines;
 }
-
-/** A radial gap this wide (px) separates two distinct arcs of one component. */
-const ARC_SPLIT = 30;
-/** Edge points this close (px) to a detected straight edge are not arc samples. */
-const LINE_MARGIN = 2.5;
-/** Fewest edge points at one coordinate to count as a straight edge rather than an arc extreme. */
-const MIN_STRAIGHT_RUN = 80;
 
 type Sector = { region: Region; inner: number; outer: number; gap: number; from: number; to: number };
 type Wedge = { region: Region; radius: number; from: number; to: number };
@@ -341,14 +353,20 @@ function measure(data: Buffer, width: number, height: number): Geometry {
 	return { size: width, cx, cy, sectors, wedge };
 }
 
+/** Chooses the `fill` for a region. The only thing that differs between the two variants. */
+type FillResolver = (region: Region) => string;
+
 /**
  * Emits the measured geometry as arc paths in a `0 0 VIEW VIEW` viewBox.
  *
  * Each sector is an annulus sector whose two radial edges are pushed `gap` px off the axes,
  * so a chord at radius `r` starts `asin(gap / r)` into the quadrant. The wedge is a three-quarter
  * pie on the same centre.
+ *
+ * Both variants go through this one function, so the colour and monochrome files cannot disagree
+ * on geometry — only on what `fillOf` returns.
  */
-function buildSvg(geometry: Geometry): string {
+function buildSvg(geometry: Geometry, fillOf: FillResolver): string {
 	const scale = VIEW / geometry.size;
 	const cx = geometry.cx * scale;
 	const cy = geometry.cy * scale;
@@ -365,13 +383,13 @@ function buildSvg(geometry: Geometry): string {
 		const outerInset = Math.asin(gap / outer);
 		const i0 = sector.from + innerInset, i1 = sector.to - innerInset;
 		const o0 = sector.from + outerInset, o1 = sector.to - outerInset;
-		return `<path fill="${FILLS[sector.region]}" d="M${point(inner, i0)} L${point(outer, o0)} ` +
+		return `<path fill="${fillOf(sector.region)}" d="M${point(inner, i0)} L${point(outer, o0)} ` +
 			`${arc(outer, o0, o1)} L${point(inner, i1)} ${arc(inner, i1, i0)} Z"/>`;
 	});
 
 	const radius = geometry.wedge.radius * scale;
 	paths.push(
-		`<path fill="${FILLS[geometry.wedge.region]}" d="M${n(cx)} ${n(cy)} L${point(radius, geometry.wedge.from)} ` +
+		`<path fill="${fillOf(geometry.wedge.region)}" d="M${n(cx)} ${n(cy)} L${point(radius, geometry.wedge.from)} ` +
 		`${arc(radius, geometry.wedge.from, geometry.wedge.to)} Z"/>`,
 	);
 
@@ -388,14 +406,13 @@ async function main(): Promise<void> {
 	console.log(`source ${width}x${height}`);
 
 	const geometry = measure(data, width, height);
-	const svg = buildSvg(geometry);
-	mkdirSync(dirname(OUTPUT), { recursive: true });
-	writeFileSync(OUTPUT, svg, 'utf8');
+	const colour = buildSvg(geometry, (region) => FILLS[region]);
+	const mono = buildSvg(geometry, () => 'currentColor');
 
-	// Render the SVG back at the source resolution: `density` scales rasterisation itself, so
-	// the arcs are drawn at 1275 px rather than drawn at 40 px and blown up.
+	// Render the colour variant back at the source resolution: `density` scales rasterisation
+	// itself, so the arcs are drawn at 1275 px rather than drawn at 40 px and blown up.
 	const density = (72 * width) / VIEW;
-	const rendered = await sharp(Buffer.from(svg), { density }).resize(width, height).ensureAlpha().raw().toBuffer();
+	const rendered = await sharp(Buffer.from(colour), { density }).resize(width, height).ensureAlpha().raw().toBuffer();
 	let mismatch = 0;
 	for (let i = 0; i < width * height; i++) {
 		const src = { r: data[i * 4], g: data[i * 4 + 1], b: data[i * 4 + 2], a: data[i * 4 + 3] };
@@ -405,9 +422,21 @@ async function main(): Promise<void> {
 	const ratio = mismatch / (width * height);
 	console.log(`mismatch ${(ratio * 100).toFixed(3)}% (${mismatch} of ${width * height} px)`);
 	if (ratio > MAX_MISMATCH_RATIO) {
-		throw new Error(`trace mismatch ${(ratio * 100).toFixed(3)}% exceeds ${(MAX_MISMATCH_RATIO * 100).toFixed(1)}%`);
+		throw new Error(
+			`trace mismatch ${(ratio * 100).toFixed(3)}% exceeds ${(MAX_MISMATCH_RATIO * 100).toFixed(1)}%; ` +
+			'nothing written',
+		);
 	}
-	console.log(`wrote ${OUTPUT} (${Buffer.byteLength(svg, 'utf8')} bytes)`);
+
+	// Nothing touches disk until the trace is proven, so a failing run leaves the committed assets
+	// intact. Only the colour variant is rasterised: the monochrome one is the same `buildSvg` call
+	// with a different `fillOf`, so its path data is identical by construction and a second
+	// comparison could not fail independently of the first.
+	mkdirSync(dirname(OUTPUT), { recursive: true });
+	writeFileSync(OUTPUT, colour, 'utf8');
+	writeFileSync(OUTPUT_MONO, mono, 'utf8');
+	console.log(`wrote ${OUTPUT} (${Buffer.byteLength(colour, 'utf8')} bytes)`);
+	console.log(`wrote ${OUTPUT_MONO} (${Buffer.byteLength(mono, 'utf8')} bytes)`);
 }
 
 main().catch((error) => {
