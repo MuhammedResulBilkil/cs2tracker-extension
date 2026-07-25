@@ -60,19 +60,33 @@ export const SettingsPanel = () => {
 
 	return (
 		<>
+			{/*
+			 * layout="below" puts each control under its own label instead of beside it. This panel renders
+			 * in Millennium's Quick Access sidebar, which is around 330px wide, and Steam's ToggleField is a
+			 * two-option OFF/ON segmented control rather than a single switch -- so inline, a three-word
+			 * label and both option labels compete for one row and the control ends up crushed against the
+			 * text. A Material-style theme restyling .DialogToggleField_Option makes it worse still.
+			 *
+			 * It is Steam's own prop, from ItemProps, not a stylesheet of ours. That distinction is the
+			 * whole reason this is the right fix: the plugin database rejects custom-styled settings UI, so
+			 * reaching for CSS here would trade a layout bug for a review rejection.
+			 */}
 			<ToggleField
+				layout="below"
 				label={SETTING_LABELS.showOnProfiles}
 				description={DESCRIPTIONS.showOnProfiles}
 				checked={showOnProfiles}
 				onChange={setShowOnProfiles}
 			/>
 			<ToggleField
+				layout="below"
 				label={SETTING_LABELS.showOnFriendLists}
 				description={DESCRIPTIONS.showOnFriendLists}
 				checked={showOnFriendLists}
 				onChange={setShowOnFriendLists}
 			/>
 			<ToggleField
+				layout="below"
 				label={SETTING_LABELS.openExternal}
 				description={DESCRIPTIONS.openExternal}
 				checked={openExternal}
