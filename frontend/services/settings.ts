@@ -1,6 +1,6 @@
-import { usePluginConfig } from '@steambrew/client';
+import { toaster, usePluginConfig } from '@steambrew/client';
 import { type PluginSettings } from '../../shared/settings';
-import { guardSettingWrite, resolveSetting } from './setting-value';
+import { guardSettingWrite, resolveSetting, settingWriteFailureNotice } from './setting-value';
 
 /**
  * The only module in the frontend bundle that touches @steambrew/client's config API.
@@ -11,10 +11,10 @@ import { guardSettingWrite, resolveSetting } from './setting-value';
  * module cache initialises at import time by pushing onto window.webpackChunksteamui -- a global only
  * the Steam client defines. Millennium's bundler supplies both; a test runner supplies neither.
  *
- * So nothing here decides anything. The two functions this hook is made of live in
- * ./setting-value.ts, which imports nothing from Steam and is covered by
- * tests/frontend-setting-value.test.ts. What is left below is the hook call, the wiring, and one
- * console line.
+ * So nothing here decides anything. The functions this hook is made of, and the words it reports a
+ * failure with, live in ./setting-value.ts, which imports nothing from Steam and is covered by
+ * tests/frontend-setting-value.test.ts. What is left below is the hook call, the wiring, one console
+ * line, and one toast.
  *
  * Do not alias, destructure, wrap, or pass along usePluginConfig. It must stay a literal
  * `usePluginConfig(...)` call on the imported binding, in this file. Millennium's transpiler rewrites
@@ -47,8 +47,25 @@ export function useSetting<K extends keyof PluginSettings>(
 ): [PluginSettings[K], (value: PluginSettings[K]) => void] {
 	const [stored, setStored] = usePluginConfig<PluginSettings[K]>(key);
 
+	/*
+	 * Both reports, and in this order. The console line is for whoever reads the log after a bug report;
+	 * the toast is for the user sitting in front of the panel, who otherwise sees the toggle slide back
+	 * with nothing on screen to explain it -- the displayed value is the config store's, with no
+	 * optimistic local state to hold their click.
+	 *
+	 * The console line goes first because toaster.toast can throw. It swallows its own delivery failure,
+	 * but it reads window.NotificationStore before that try block, so a Steam that has not built the
+	 * store yet -- or a Millennium too old to export toaster at all -- throws from this callback. That is
+	 * survivable rather than merely unlikely: guardSettingWrite runs this hook inside its own try/catch
+	 * precisely so a broken diagnostic cannot become the unhandled rejection it exists to prevent. The
+	 * order is what keeps the log line on the near side of that.
+	 *
+	 * playSound is off. The toast lands while the user is looking at the toggle that just moved, so the
+	 * notification chime adds alarm rather than information.
+	 */
 	const update = guardSettingWrite(setStored, (error: unknown) => {
 		console.error(`[CS2Tracker] Failed to save "${key}":`, error);
+		toaster.toast({ ...settingWriteFailureNotice(key), playSound: false });
 	});
 
 	return [resolveSetting(key, stored), update];
