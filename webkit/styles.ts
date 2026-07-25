@@ -8,19 +8,41 @@ export const STYLE_ELEMENT_ID = 'cs2tracker-extension-style';
 /**
  * Both injection points, in one stylesheet.
  *
- * .cs2tracker-btn and .cs2tracker-btn__icon dress the profile button (Task 7); .friend_block_v2 and
- * .cs2tracker-friend-badge dress the friend row badges (Task 8). .friend_block_v2 is Steam's own class
- * and is touched for one reason: the badge is absolutely positioned, so the row it sits in has to be a
- * positioned ancestor or the badge escapes to the nearest one that is. Setting position on somebody
- * else's element is a real cost, but position:relative on a block that is already laid out changes
- * nothing visually and is the narrowest hook available.
+ * .cs2tracker-btn, its states and .cs2tracker-btn__icon dress the profile button (Task 7);
+ * .friend_block_v2 and .cs2tracker-friend-badge dress the friend row badges (Task 8).
  *
- * text-decoration:none!important on hover overrides Steam's anchor rules, which are themselves
- * !important; nothing else here needs to shout.
+ * box-sizing:border-box is load-bearing next to width:100%. The rule also declares horizontal padding
+ * and a 1px border, so under content-box the button overflows its parent by 26px across and 2px down.
+ * It would lay out correctly only if Steam happened to apply border-box globally, and relying on
+ * somebody else's reset for your own layout is a coincidence rather than a decision.
+ *
+ * :focus-visible is what makes outline:none legitimate. The button is an interactive control, and
+ * removing the user-agent focus ring without replacing it leaves keyboard users with no indication of
+ * where they are -- WCAG 2.4.7. The replacement reuses the hover accent so the two states read as one
+ * design, and outline-offset keeps the ring clear of the border.
+ *
+ * .friend_block_v2 is Steam's own class, and touching it has a real cost that runs in both directions.
+ * Forwards: every badge is position:absolute, so the row has to be a positioned ancestor or the badge
+ * escapes to whatever positioned element is next up the tree. Backwards, and this is the part worth
+ * checking against a live client: position:relative is *not* visually inert. It makes the row the
+ * containing block for any absolutely-positioned descendant Steam already has in there -- its row-wide
+ * link overlay and status markers, among others -- so any of those currently resolving against an
+ * ancestor further out silently re-anchor to the row. The declaration is still the narrowest hook
+ * available, but it is a change to Steam's layout, not a no-op. Related: a positioned box with
+ * z-index:auto starts no stacking context, so the badge's z-index competes with Steam's overlay in
+ * whichever context encloses them both.
+ *
+ * text-decoration:none is declared twice on purpose. Nothing here can see Steam's stylesheet, so the
+ * base declaration wins on source order against an equally specific Steam rule and loses to a more
+ * specific one; hover is where Steam most reliably puts an underline back, so that one declaration
+ * shouts and the rest do not. If a live check finds Steam's base anchor rule is itself !important, then
+ * the base declaration here is dead and the !important belongs on both -- unresolvable offline, so it
+ * is stated rather than assumed.
  */
 const CSS = [
-	'.cs2tracker-btn{display:flex;width:100%;height:3rem;align-items:center;justify-content:center;gap:8px;margin:10px 0;padding:0 12px;color:#fff;font-weight:700;letter-spacing:.02em;text-transform:uppercase;background-color:#12161f;border:1px solid #1e2635;border-radius:5px;cursor:pointer;text-decoration:none;outline:none;transition:background-color .2s ease,border-color .2s ease}',
+	'.cs2tracker-btn{display:flex;box-sizing:border-box;width:100%;height:3rem;align-items:center;justify-content:center;gap:8px;margin:10px 0;padding:0 12px;color:#fff;font-weight:700;letter-spacing:.02em;text-transform:uppercase;background-color:#12161f;border:1px solid #1e2635;border-radius:5px;cursor:pointer;text-decoration:none;outline:none;transition:background-color .2s ease,border-color .2s ease}',
 	'.cs2tracker-btn:hover{background-color:#18202e;border-color:#007aef;text-decoration:none!important}',
+	'.cs2tracker-btn:focus-visible{outline:2px solid #007aef;outline-offset:2px}',
 	'.cs2tracker-btn__icon{height:20px;width:20px;flex:0 0 auto}',
 	'.friend_block_v2{position:relative}',
 	'.cs2tracker-friend-badge{position:absolute;top:6px;right:6px;z-index:5;display:flex;height:22px;width:22px;align-items:center;justify-content:center;border-radius:4px;background-color:rgba(12,16,23,.85);opacity:.75;transition:opacity .15s ease}',

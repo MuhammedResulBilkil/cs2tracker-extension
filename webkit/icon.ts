@@ -18,11 +18,16 @@ export const CS2TRACKER_ICON_SVG =
  * Parsed rather than assigned through innerHTML: the markup is a static constant with no
  * interpolation, and store review flags innerHTML on sight.
  *
- * A parse failure has two shapes and both are checked. A real browser replaces the document element
- * with <parsererror>; happy-dom, and libxml behind it, keeps the partial root and injects
- * <parsererror> as a descendant. importNode is what makes the result belong to `doc` -- a node built
- * against another document throws WrongDocumentError on insert -- and it copies, so every call hands
- * back its own subtree.
+ * A parse failure has two shapes and both are checked. They are two engines' conventions, not a real
+ * browser versus a test double: Blink, which is what Steam's embedded browser is, reports the error by
+ * inserting <parsererror> as a descendant of whatever partial root it built -- the same shape happy-dom
+ * produces through libxml -- so querySelector is the branch that fires in production and under test.
+ * Gecko instead makes <parsererror> the document element, and querySelector never matches the element
+ * it is called on, so the nodeName check is the only guard for that shape. It is unreachable on a
+ * Blink-shaped host and kept deliberately.
+ *
+ * importNode is what makes the result belong to `doc` -- a node built against another document throws
+ * WrongDocumentError on insert -- and it copies, so every call hands back its own subtree.
  */
 export function createIcon(doc: Document, className: string): Element | null {
 	const parsed = new DOMParser().parseFromString(CS2TRACKER_ICON_SVG, 'image/svg+xml');
