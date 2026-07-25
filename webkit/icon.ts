@@ -21,7 +21,7 @@ export const CS2TRACKER_ICON_SVG =
  * A parse failure has two shapes and both are checked. They are two engines' conventions, not a real
  * browser versus a test double: Blink, which is what Steam's embedded browser is, reports the error by
  * inserting <parsererror> as a descendant of whatever partial root it built -- the same shape happy-dom
- * produces through libxml -- so querySelector is the branch that fires in production and under test.
+ * produces -- so querySelector is the branch that fires in production and under test.
  * Gecko instead makes <parsererror> the document element, and querySelector never matches the element
  * it is called on, so the nodeName check is the only guard for that shape. It is unreachable on a
  * Blink-shaped host and kept deliberately.

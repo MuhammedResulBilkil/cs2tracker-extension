@@ -77,10 +77,10 @@ describe('createIcon', () => {
 	/**
 	 * The markup is a static constant, so the guard is only reachable by replacing the parser. happy-dom
 	 * is faithful enough for that to mean something: on malformed XML it does not throw, it injects a
-	 * <parsererror> child into whatever partial root it managed to build -- which is the
-	 * querySelector half of the guard. The nodeName half covers the real browser, which makes
-	 * <parsererror> the document element instead; that shape is unreachable here, so this test does not
-	 * claim to cover it.
+	 * <parsererror> child into whatever partial root it managed to build. That is Blink's shape, and Blink
+	 * is what Steam's embedded browser runs, so the querySelector half of the guard is covered here and in
+	 * production by the same behaviour. The nodeName half is for Gecko, which makes <parsererror> the
+	 * document element instead; that shape is unreachable here, so this test does not claim to cover it.
 	 */
 	it('returns null rather than an error box when parsing fails', () => {
 		const broken = new DOMParser().parseFromString('<svg><path d="M0 0"></svg>', 'image/svg+xml');

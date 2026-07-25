@@ -8,14 +8,27 @@ beforeEach(() => {
 const cssOf = (doc: Document) => doc.getElementById(STYLE_ELEMENT_ID)?.textContent ?? '';
 
 /**
- * The declarations belonging to one exact selector, so a declaration can be pinned to the rule that
- * owns it instead of to the stylesheet as a whole. Returns '' when that selector has no rule, which
- * fails the assertion that asked for it rather than passing on text found somewhere else.
+ * The sheet as exact selector -> declarations pairs.
+ *
+ * Split on '}' rather than searched for '<selector>{', because searching only anchors the *end* of the
+ * selector. '.cs2tracker-btn{' is a substring of '.friend_block_v2 .cs2tracker-btn{' and of
+ * '@media print{.cs2tracker-btn{', so either edit would have satisfied every assertion below while
+ * leaving Task 7's standalone button unstyled in the client -- it has no .friend_block_v2 ancestor and it
+ * is not being printed. Splitting makes the selector a key that has to match in full: a descendant
+ * selector is a different key, and an at-rule wrapper makes '@media print' the key and takes the rule it
+ * encloses with it. Only the outer whitespace is trimmed, so formatting is free but a combinator is not.
  */
-function ruleBody(css: string, selector: string): string {
-	const open = css.indexOf(`${selector}{`);
-	return open === -1 ? '' : css.slice(open + selector.length + 1, css.indexOf('}', open));
+function rulesOf(css: string): Map<string, string> {
+	const rules = new Map<string, string>();
+	for (const chunk of css.split('}')) {
+		const open = chunk.indexOf('{');
+		if (open !== -1) rules.set(chunk.slice(0, open).trim(), chunk.slice(open + 1));
+	}
+	return rules;
 }
+
+/** The declarations of one exact selector, or '' when the sheet has no rule with precisely that selector. */
+const ruleBody = (css: string, selector: string) => rulesOf(css).get(selector) ?? '';
 
 describe('ensureStyles', () => {
 	it('adds a single style element', () => {
@@ -31,38 +44,46 @@ describe('ensureStyles', () => {
 	});
 
 	/**
-	 * Anchored on the opening brace, one assertion per selector.
+	 * One assertion per selector, matched in full.
 	 *
 	 * The two bare substring checks this replaces could not tell a rule from a longer selector that
 	 * merely starts the same way: '.cs2tracker-btn' is a substring of '.cs2tracker-btn__icon{...}' and
 	 * '.cs2tracker-friend-badge' of '.cs2tracker-friend-badge:hover{...}'. Both rules the injectors
 	 * actually mount against could therefore have been deleted outright with the suite still green, which
 	 * left the CSS half of this module effectively unpinned. Every selector Tasks 7 and 8 consume now has
-	 * its own rule and its own assertion.
+	 * its own rule and its own assertion, and rulesOf compares the whole selector so a rule cannot satisfy
+	 * one of these by growing a combinator or an at-rule wrapper either.
 	 */
 	it.each([
-		'.cs2tracker-btn{',
-		'.cs2tracker-btn:hover{',
-		'.cs2tracker-btn:focus-visible{',
-		'.cs2tracker-btn__icon{',
-		'.cs2tracker-friend-badge{',
-		'.cs2tracker-friend-badge:hover{',
-		'.cs2tracker-friend-badge svg{',
-	])('writes a rule of its own for %s', (rule) => {
+		'.cs2tracker-btn',
+		'.cs2tracker-btn:hover',
+		'.cs2tracker-btn:focus-visible',
+		'.cs2tracker-btn__icon',
+		'.friend_block_v2',
+		'.cs2tracker-friend-badge',
+		'.cs2tracker-friend-badge:hover',
+		'.cs2tracker-friend-badge svg',
+	])('writes a rule whose selector is exactly %s', (selector) => {
 		ensureStyles(document);
-		expect(cssOf(document)).toContain(rule);
+		expect([...rulesOf(cssOf(document)).keys()]).toContain(selector);
 	});
 
 	/**
-	 * Pinned as the whole declaration rather than the selector alone, because the value is the point.
-	 * Every badge is position:absolute, so this one rule is what makes the friend row the badge's
-	 * containing block. Delete it and each badge silently reparents to whatever positioned ancestor is
-	 * next up the tree: nothing fails, nothing is visible in CI, and nothing is wrong until somebody
-	 * opens Steam. It is the hardest coupling in this module and it had no assertion at all.
+	 * The declaration, looked up inside its own rule -- not the rule's full text.
+	 *
+	 * Pinning the literal '.friend_block_v2{position:relative}' froze the rule at exactly one
+	 * declaration: adding isolation:isolate, which this module's docblock contemplates as the answer to
+	 * the deferred stacking-context question, would have failed a test named for the positioned ancestor
+	 * about an edit that does not touch it. The weaker assertion kills the deletion just as dead.
+	 *
+	 * Every badge is position:absolute, so this declaration is what makes the friend row the badge's
+	 * containing block. Without it each badge silently reparents to whatever positioned ancestor is next
+	 * up the tree: nothing fails, nothing is visible in CI, and nothing is wrong until somebody opens
+	 * Steam. It is the hardest coupling in this module and it had no assertion at all.
 	 */
 	it('makes the friend row a positioned ancestor for the badge', () => {
 		ensureStyles(document);
-		expect(cssOf(document)).toContain('.friend_block_v2{position:relative}');
+		expect(ruleBody(cssOf(document), '.friend_block_v2')).toContain('position:relative');
 	});
 
 	/**
