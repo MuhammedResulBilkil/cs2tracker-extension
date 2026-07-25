@@ -27,6 +27,11 @@ concurrency:
 jobs:
     release:
         runs-on: ubuntu-latest
+        # Because nothing cancels this workflow, nothing would rescue a hung run
+        # from the runner's six-hour default either — and it holds the `release`
+        # concurrency lock for the whole time, blocking every release behind it.
+        # A full release is a couple of minutes.
+        timeout-minutes: 20
         # `push` is already filtered to master; this covers workflow_dispatch,
         # which GitHub allows from any ref.
         if: github.ref == 'refs/heads/master'
@@ -57,17 +62,26 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
-            # CI owns the full typecheck matrix; these two steps are here for a
+            # CI owns the full typecheck matrix; these three steps are here for a
             # different reason. semantic-release builds the bundles and the zip
             # from its publish step, which runs *after* the release commit and
-            # tag have been pushed. Running the same test suite and the same
-            # build first means a failure lands while nothing has been published
-            # yet, instead of leaving a tag with no assets against it.
+            # tag have been pushed. Running the same test suite, the same build,
+            # and the same packaging first means a failure lands while nothing
+            # has been published yet, instead of leaving a tag with no assets
+            # against it.
             - name: Test
               run: pnpm test
 
             - name: Build
               run: pnpm run build
+
+            # build-plugin.ts is the only genuinely new code in that publish
+            # step. `--dry-run` walks all of it — staging, the metadata and
+            # plugin-id derivation, the asset-glob assertion, the archive — and
+            # writes into the staging directory it then deletes, so no zip
+            # survives to be uploaded next to the real one.
+            - name: Smoke-test the release packaging
+              run: pnpm exec tsx scripts/build-plugin.ts --dry-run
 
             - name: Release
               run: pnpm exec semantic-release
