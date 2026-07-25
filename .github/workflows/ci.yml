@@ -1,0 +1,76 @@
+name: CI
+
+on:
+    # No branch filter: feature branches must be verified before they reach
+    # master, not after.
+    push:
+    pull_request:
+        branches: [master]
+
+permissions:
+    contents: read
+
+# A branch under active development gets pushed often; only the newest commit
+# needs a verdict.
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    verify:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  # A major-only pin, deliberately loose. No pnpm 10 or 11
+                  # release rewrites pnpm-lock.yaml, so --frozen-lockfile holds
+                  # across the range and package.json needs no packageManager
+                  # field to force a self-switch.
+                  version: '11'
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '24'
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            # Two typecheck passes, because neither subsumes the other. The
+            # package script compiles frontend and webkit as separate programs
+            # with their own `types` and `lib`, which is what keeps DOM globals
+            # out of the client bundle and @steambrew/client out of webkit. The
+            # root project is the only one that covers tests/ and scripts/ —
+            # vitest strips types through esbuild without checking them, so a
+            # test asserting against a mistyped API would otherwise pass
+            # forever.
+            - name: Typecheck frontend and webkit
+              run: pnpm run typecheck
+
+            - name: Typecheck tests and shared sources
+              run: pnpm exec tsc -p tsconfig.json --noEmit
+
+            - name: Typecheck build scripts
+              run: pnpm exec tsc -p scripts/tsconfig.json --noEmit
+
+            - name: Test
+              run: pnpm test
+
+            - name: Build
+              run: pnpm run build
+
+            # The store's own pipeline runs `pnpm install && pnpm run build` and
+            # then expects these paths. Assert them here so a break surfaces on
+            # a push instead of during store review.
+            - name: Verify build output
+              run: |
+                  test -f .millennium/Dist/index.js
+                  test -f .millennium/Dist/webkit.js
+                  test -f backend/main.lua
+                  node -e "const p=require('./plugin.json'); for (const k of ['name','common_name','version','backendType']) if (!p[k]) throw new Error('plugin.json is missing '+k);"
