@@ -37,10 +37,11 @@ const PROFILE_PATH_PATTERN = /^\/(id|profiles)\/[^/]+/;
 /**
  * How long waitForElement watches before giving up.
  *
- * Generous on purpose. It is not a deadline the user notices -- nothing is waiting on it and expiring is
- * silent -- it is the point at which an observer watching the whole document stops being worth its cost on
- * a page that was never going to render the element. A community page that has not laid out its sidebar
- * within fifteen seconds is a page where Steam, not this plugin, is the thing that is slow.
+ * Generous on purpose. It is not a deadline the user notices -- nothing is waiting on it, and expiring costs
+ * a console line rather than a broken page -- it is the point at which an observer watching the whole
+ * document stops being worth its cost on a page that was never going to render the element. A community page
+ * that has not laid out its sidebar within fifteen seconds is a page where Steam, not this plugin, is the
+ * thing that is slow. It is also the number that ends up in the warning, so it should stay round.
  */
 const DEFAULT_TIMEOUT_MS = 15000;
 
@@ -88,15 +89,34 @@ export function waitForElement(
 	 * The single exit. Idempotent, because all three paths lead here and two of them can race: the timer
 	 * can come due while a mutation batch is queued, and disposeAll can arrive during either.
 	 *
-	 * `timer` is read rather than closed over as a constant because stop() is reachable before the
-	 * assignment below -- observe() can deliver a batch synchronously enough that the callback runs first
-	 * -- and clearing `undefined` has to be the no-op rather than a crash.
+	 * The `timer !== undefined` guard is not defending against a call that can happen today. Nothing reaches
+	 * stop() before the assignment below: a MutationObserver never invokes its callback synchronously from
+	 * observe(), the timer cannot fire before it has been created, and the disposer is registered afterwards.
+	 * It is here because `timer` is typed `| undefined` -- it has to be, since it is assigned after the
+	 * closure that reads it -- and a function that is total over its own declared types cannot be broken by a
+	 * later edit moving a stop() above the assignment. Cheaper than the comment explaining why it is safe to
+	 * leave out.
 	 */
 	const stop = () => {
 		if (settled) return;
 		settled = true;
 		observer.disconnect();
 		if (timer !== undefined) clearTimeout(timer);
+	};
+
+	/**
+	 * Giving up, as distinct from being stopped. Split from stop() so only this path logs: a waiter torn down
+	 * with the page, or one that found what it wanted, has nothing to report.
+	 *
+	 * The warning is here because expiry was the one silent failure left in the bundle -- every other path
+	 * that fails says so. A renamed or mistyped selector produces no button, no error and no output, which is
+	 * indistinguishable from the user having switched the feature off. One line turns that from guesswork
+	 * into a diagnosis, and it can only ever print once per waiter.
+	 */
+	const expire = () => {
+		if (settled) return;
+		stop();
+		console.warn(`[CS2Tracker] Gave up waiting for "${selector}" after ${timeoutMs}ms.`);
 	};
 
 	// `observer` is referenced by stop() above and declared here: the two are mutually recursive and one of
@@ -116,7 +136,7 @@ export function waitForElement(
 	});
 
 	observer.observe(doc.documentElement, { childList: true, subtree: true });
-	timer = setTimeout(stop, timeoutMs);
+	timer = setTimeout(expire, timeoutMs);
 
 	// Without this the waiter survives its own teardown: disposeAll would leave the observer connected and
 	// the callback would fire into a page the plugin has already been switched off on.

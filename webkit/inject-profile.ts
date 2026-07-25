@@ -9,7 +9,16 @@ import { ensureStyles } from './styles';
  */
 export const PROFILE_CONTAINER_CLASS = 'cs2tracker-extension-container';
 
-const RIGHT_COLUMN_SELECTOR = '.profile_rightcol';
+/**
+ * Steam's profile sidebar, and the only anchor this module injects into.
+ *
+ * Exported because the entry has to wait for this exact element before calling in, and a second copy of the
+ * literal fails silently in both directions: if the waiter's selector is the stale one it fires on an element
+ * this module will not accept and injection answers false, and if this one is stale the waiter never fires and
+ * injection is never attempted. Neither shows up as an error. Same reason PROFILE_CONTAINER_CLASS is exported.
+ */
+export const PROFILE_COLUMN_SELECTOR = '.profile_rightcol';
+
 const BUTTON_LABEL = 'CS2Tracker.gg';
 
 /**
@@ -22,7 +31,7 @@ const BUTTON_LABEL = 'CS2Tracker.gg';
  * promise does not reject: a rejection would be a sixth outcome meaning the opposite of the other five.
  */
 export async function injectProfileButton(doc: Document, win: unknown, openExternal: boolean): Promise<boolean> {
-	const column = doc.querySelector(RIGHT_COLUMN_SELECTOR);
+	const column = doc.querySelector(PROFILE_COLUMN_SELECTOR);
 	if (!column) return false;
 	if (column.querySelector(`.${PROFILE_CONTAINER_CLASS}`)) return false;
 

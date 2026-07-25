@@ -120,7 +120,15 @@ describe('waitForElement', () => {
 		expect(run).toHaveBeenCalledOnce();
 	});
 
-	it('gives up after the timeout and never runs', async () => {
+	/**
+	 * The spy is doing two jobs. It keeps the output pristine, since expiry is the one path that logs, and it
+	 * is the assertion for that log: expiry was the only silent failure left in the bundle, and a mistyped or
+	 * renamed selector otherwise produces no button, no error and no output at all -- indistinguishable from
+	 * the user having switched the feature off. The selector and the elapsed time are both in the message
+	 * because either one alone leaves the reader guessing which waiter it was.
+	 */
+	it('gives up after the timeout, never runs, and says so', async () => {
+		const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const run = vi.fn();
 		waitForElement(document, '.target', run, 10);
 		await macrotask();
@@ -128,16 +136,34 @@ describe('waitForElement', () => {
 		document.body.innerHTML = '<div class="target"></div>';
 		await macrotask();
 		expect(run).not.toHaveBeenCalled();
+		expect(warned).toHaveBeenCalledOnce();
+		expect(warned.mock.calls[0][0]).toContain('.target');
+		expect(warned.mock.calls[0][0]).toContain('10');
 	});
 
-	it('stops waiting once disposed', async () => {
+	// The two quiet exits, asserted as quiet. Only giving up is worth a line: a waiter that found what it
+	// wanted has nothing to report, and one torn down with its page is not a failure at all -- logging either
+	// would put a warning in the console of every profile page the plugin works correctly on.
+	it('says nothing when it finds the element', async () => {
+		const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		waitForElement(document, '.target', vi.fn(), 10);
+
+		document.body.innerHTML = '<div class="target"></div>';
+		await macrotask();
+		expect(warned).not.toHaveBeenCalled();
+	});
+
+	it('stops waiting once disposed, and says nothing', async () => {
+		const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const run = vi.fn();
-		waitForElement(document, '.target', run);
+		waitForElement(document, '.target', run, 10);
 		disposeAll();
 
 		document.body.innerHTML = '<div class="target"></div>';
 		await macrotask();
+		await macrotask();
 		expect(run).not.toHaveBeenCalled();
+		expect(warned).not.toHaveBeenCalled();
 	});
 
 	/**
@@ -201,8 +227,10 @@ describe('waitForElement cleanup', () => {
 	});
 
 	// The timeout path has no timer left to check -- the one that fired is gone by definition -- so the
-	// observer is the whole assertion, and it is invisible to the give-up test above.
+	// observer is the whole assertion, and it is invisible to the give-up test above. console.warn is
+	// silenced rather than asserted here; that message has its own test.
 	it('disconnects when it gives up', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const disconnected = vi.spyOn(MutationObserver.prototype, 'disconnect');
 
 		waitForElement(document, '.target', vi.fn(), 10);
