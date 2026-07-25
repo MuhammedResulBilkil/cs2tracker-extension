@@ -118,6 +118,50 @@ describe('ensureStyles', () => {
 	 * every assertion above and then leave the second page unstyled. Asserting on both documents in one
 	 * test is what makes the flag impossible: a per-document check satisfies both, a shared flag cannot.
 	 */
+	/**
+	 * The reason this assertion exists is not tidiness.
+	 *
+	 * The button is styled to match CSStats.gg's, which sits directly above it on a profile where both
+	 * plugins are installed. CSStats gets its typeface from `@import url(fonts.googleapis.com/...)`, and
+	 * finishing the match by copying that line is the obvious next edit for anyone comparing the two --
+	 * it is the one visible difference left.
+	 *
+	 * It would also make every Steam community page the reader opens fetch a font from Google, putting
+	 * their IP in Google's logs on every profile view. This plugin makes exactly two requests of its own
+	 * and both go to steamcommunity.com; the README's Privacy section states that as a fact a reader is
+	 * expected to rely on. A stylesheet @import is a network request that no code review of the .ts files
+	 * would surface, so it gets a test instead of a comment.
+	 */
+	it('fetches nothing over the network', () => {
+		ensureStyles(document);
+		const css = cssOf(document);
+		expect(css).not.toContain('@import');
+		expect(css).not.toMatch(/url\(\s*['"]?https?:/i);
+		expect(css).not.toContain('fonts.googleapis.com');
+	});
+
+	it('matches the CSStats.gg wordmark treatment it sits beside', () => {
+		ensureStyles(document);
+		const button = ruleBody(cssOf(document), '.cs2tracker-btn');
+		// The four declarations that carry the resemblance. Height and hover colour are asserted with the
+		// literals CSStats uses, so a later restyle of one button cannot silently desynchronise them.
+		expect(button).toContain('font-size:20px');
+		expect(button).toContain('font-weight:800');
+		expect(button).toContain('text-transform:uppercase');
+		expect(button).toContain('background-color:#1a1a1a');
+		expect(button).toContain('height:3rem');
+		expect(ruleBody(cssOf(document), '.cs2tracker-btn:hover')).toContain('background-color:#2d3748');
+	});
+
+	it('gives the accent word the brand colour and shifts it on hover', () => {
+		ensureStyles(document);
+		const css = cssOf(document);
+		expect(ruleBody(css, '.cs2tracker-btn__accent')).toContain('color:#007aef');
+		// Scoped to :hover on the button rather than on the span, so the colour follows the pointer being
+		// anywhere over the button -- which is how CSStats behaves and what makes the two feel related.
+		expect(ruleBody(css, '.cs2tracker-btn:hover .cs2tracker-btn__accent')).toContain('color:#2aa6ff');
+	});
+
 	it('injects into each document it is given', () => {
 		const other = document.implementation.createHTMLDocument('other');
 		ensureStyles(document);

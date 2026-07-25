@@ -40,10 +40,23 @@ export const STYLE_ELEMENT_ID = 'cs2tracker-extension-style';
  * is stated rather than assumed.
  */
 const CSS = [
-	'.cs2tracker-btn{display:flex;box-sizing:border-box;width:100%;height:3rem;align-items:center;justify-content:center;gap:8px;margin:10px 0;padding:0 12px;color:#fff;font-weight:700;letter-spacing:.02em;text-transform:uppercase;background-color:#12161f;border:1px solid #1e2635;border-radius:5px;cursor:pointer;text-decoration:none;outline:none;transition:background-color .2s ease,border-color .2s ease}',
-	'.cs2tracker-btn:hover{background-color:#18202e;border-color:#007aef;text-decoration:none!important}',
+	// Deliberately matched to the CSStats.gg button, which sits directly above this one on any profile
+	// where both plugins are installed -- same 3rem height, same #1a1a1a ground, same #2d3748 hover, and
+	// the same 20px/800 uppercase wordmark with one word carrying the brand colour.
+	//
+	// What is NOT copied is their `@import url(fonts.googleapis.com/...)` for the Cairo typeface. That
+	// would make every community page fetch a font from Google and put the reader's IP in Google's logs,
+	// which is a network request this plugin does not otherwise make and which the README's Privacy
+	// section says does not happen. The system stack below loses the -11deg slant that Cairo's `slnt`
+	// axis provides and nothing else.
+	'.cs2tracker-btn{display:flex;box-sizing:border-box;width:100%;height:3rem;align-items:center;justify-content:center;gap:10px;margin:10px 0;padding:0 12px;font-size:20px;font-weight:800;letter-spacing:.01em;text-transform:uppercase;color:#fff;background-color:#1a1a1a;border:none;border-radius:5px;cursor:pointer;text-decoration:none;outline:none;transition:background-color .5s cubic-bezier(.23,1,.32,1)}',
+	'.cs2tracker-btn:hover{background-color:#2d3748;text-decoration:none!important}',
 	'.cs2tracker-btn:focus-visible{outline:2px solid #007aef;outline-offset:2px}',
-	'.cs2tracker-btn__icon{height:20px;width:20px;flex:0 0 auto}',
+	// The accent word. Its own transition rather than `all`, so the colour shift on hover cannot drag
+	// layout properties along with it.
+	'.cs2tracker-btn__accent{display:inline-block;color:#007aef;transition:color .5s cubic-bezier(.23,1,.32,1)}',
+	'.cs2tracker-btn:hover .cs2tracker-btn__accent{color:#2aa6ff}',
+	'.cs2tracker-btn__icon{height:22px;width:22px;flex:0 0 auto}',
 	'.friend_block_v2{position:relative}',
 	'.cs2tracker-friend-badge{position:absolute;top:6px;right:6px;z-index:5;display:flex;height:22px;width:22px;align-items:center;justify-content:center;border-radius:4px;background-color:rgba(12,16,23,.85);opacity:.75;transition:opacity .15s ease}',
 	'.cs2tracker-friend-badge:hover{opacity:1}',

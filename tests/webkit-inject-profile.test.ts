@@ -66,6 +66,29 @@ describe('injectProfileButton', () => {
 		expect(link.textContent).toContain('CS2Tracker.gg');
 	});
 
+	/**
+	 * The wordmark is three DOM nodes so the middle word can be coloured, which means the accessible name
+	 * is now a concatenation rather than one string. Splitting it wrongly -- a missing separator, a
+	 * duplicated fragment, an accent span that swallowed the suffix -- would still render as something
+	 * plausible and still satisfy a `toContain` on any one fragment.
+	 *
+	 * So this asserts the exact whole, and that the coloured word really is a separate element carrying the
+	 * class the stylesheet targets. Without the second half, dropping the span and colouring nothing would
+	 * pass: the text would be identical.
+	 */
+	it('splits the wordmark for colouring without changing the accessible name', async () => {
+		setupProfilePage();
+		await injectProfileButton(document, PROFILE_WINDOW, false);
+
+		const link = document.querySelector('a.cs2tracker-btn')!;
+		const accent = link.querySelector('.cs2tracker-btn__accent');
+
+		expect(accent).not.toBeNull();
+		expect(accent!.textContent).toBe('Tracker');
+		// The icon is aria-hidden and carries no text, so the link's text is the whole accessible name.
+		expect(link.textContent).toBe('CS2Tracker.gg');
+	});
+
 	it('uses the external URL scheme when openExternal is on', async () => {
 		setupProfilePage();
 		await injectProfileButton(document, PROFILE_WINDOW, true);

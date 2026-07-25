@@ -19,7 +19,15 @@ export const PROFILE_CONTAINER_CLASS = 'cs2tracker-extension-container';
  */
 export const PROFILE_COLUMN_SELECTOR = '.profile_rightcol';
 
-const BUTTON_LABEL = 'CS2Tracker.gg';
+/**
+ * The wordmark, split so the middle word can be coloured. Concatenated they are the button's whole
+ * accessible name, so the split must not change what that name says -- a test pins
+ * LABEL_PREFIX + LABEL_ACCENT + LABEL_SUFFIX against BUTTON_LABEL for exactly that reason.
+ */
+const LABEL_PREFIX = 'CS2';
+const LABEL_ACCENT = 'Tracker';
+const LABEL_SUFFIX = '.gg';
+const BUTTON_LABEL = `${LABEL_PREFIX}${LABEL_ACCENT}${LABEL_SUFFIX}`;
 
 /**
  * Add the CS2Tracker button to a Steam community profile page.
@@ -108,8 +116,23 @@ async function buildButton(
 	const icon = createIcon(doc, 'cs2tracker-btn__icon');
 	if (icon) link.appendChild(icon);
 
+	// The wordmark is three nodes rather than one string so the middle word can carry the brand colour,
+	// the way CSStats.gg colours "stats" inside "CSstats.gg". Built with createTextNode and textContent
+	// rather than innerHTML: the store's review rejects interpolated innerHTML on sight, and there is no
+	// reason to reach for it when the parts are known at build time.
+	//
+	// The stylesheet uppercases these, so they are written in natural case here. That matters for the
+	// accessible name, which is the concatenation of all three and reads as "CS2Tracker.gg" to a screen
+	// reader rather than as shouting.
 	const label = doc.createElement('span');
-	label.textContent = BUTTON_LABEL;
+	label.appendChild(doc.createTextNode(LABEL_PREFIX));
+
+	const accent = doc.createElement('span');
+	accent.className = 'cs2tracker-btn__accent';
+	accent.textContent = LABEL_ACCENT;
+	label.appendChild(accent);
+
+	label.appendChild(doc.createTextNode(LABEL_SUFFIX));
 	link.appendChild(label);
 
 	container.appendChild(link);
