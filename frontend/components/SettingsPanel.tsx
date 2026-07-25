@@ -1,7 +1,7 @@
 import { Field, Toggle } from '@steambrew/client';
 import type { PluginSettings } from '../../shared/settings';
 import { SETTING_LABELS } from '../services/setting-value';
-import { useSetting } from '../services/settings';
+import { useSettings } from '../services/settings';
 import { LookupField } from './LookupField';
 
 /**
@@ -13,9 +13,11 @@ import { LookupField } from './LookupField';
  * no DOM of this plugin's own. The plugin database rejects custom-styled settings UI, so that is a
  * requirement and not a preference -- and it is also why the ordering below is the whole of the layout.
  *
- * Each toggle is bound with useSetting, which reads and writes Millennium's config store reactively. The
- * setter is handed straight to onChange: it is recreated on every render by design, and since nothing
- * here is memoised there is no dependency for a useCallback to stabilise.
+ * All three toggles come from one useSettings call, which reads the settings once from the Lua backend
+ * and writes them back one key at a time. Not from Millennium's config API: reads through it never
+ * arrived, leaving this panel showing the shipped defaults over whatever the config file actually held,
+ * so every click was computed against a value that was not the stored one. frontend/services/settings.ts
+ * records the mechanism.
  */
 
 /**
@@ -54,9 +56,7 @@ const DESCRIPTIONS: Readonly<Record<keyof PluginSettings, string>> = Object.free
 });
 
 export const SettingsPanel = () => {
-	const [openExternal, setOpenExternal] = useSetting('openExternal');
-	const [showOnProfiles, setShowOnProfiles] = useSetting('showOnProfiles');
-	const [showOnFriendLists, setShowOnFriendLists] = useSetting('showOnFriendLists');
+	const { settings, setSetting, loaded } = useSettings();
 
 	return (
 		<>
@@ -81,34 +81,51 @@ export const SettingsPanel = () => {
 			 * Field for the row, Toggle for the control inside it. ToggleField is not on that list.
 			 *
 			 * Note the prop is `value`, not `checked`. Same boolean, different name from ToggleField's.
+			 *
+			 * Every switch is disabled until the first read has answered. Steam's Toggle reports
+			 * `onChange(!value)`, so a click landing before then is computed against the shipped default
+			 * rather than the stored value -- which, on an account where the two differ, writes the value
+			 * the user believed they were changing away from.
 			 */}
 			<Field
 				label={SETTING_LABELS.showOnProfiles}
 				description={DESCRIPTIONS.showOnProfiles}
 				bottomSeparator="standard"
 			>
-				<Toggle value={showOnProfiles} onChange={setShowOnProfiles} />
+				<Toggle
+					value={settings.showOnProfiles}
+					disabled={!loaded}
+					onChange={(value) => setSetting('showOnProfiles', value)}
+				/>
 			</Field>
 			<Field
 				label={SETTING_LABELS.showOnFriendLists}
 				description={DESCRIPTIONS.showOnFriendLists}
 				bottomSeparator="standard"
 			>
-				<Toggle value={showOnFriendLists} onChange={setShowOnFriendLists} />
+				<Toggle
+					value={settings.showOnFriendLists}
+					disabled={!loaded}
+					onChange={(value) => setSetting('showOnFriendLists', value)}
+				/>
 			</Field>
 			<Field
 				label={SETTING_LABELS.openExternal}
 				description={DESCRIPTIONS.openExternal}
 				bottomSeparator="standard"
 			>
-				<Toggle value={openExternal} onChange={setOpenExternal} />
+				<Toggle
+					value={settings.openExternal}
+					disabled={!loaded}
+					onChange={(value) => setSetting('openExternal', value)}
+				/>
 			</Field>
 			{/*
 			 * openExternal is passed down rather than read again inside LookupField, so the panel holds one
-			 * subscription to the setting and the toggle above cannot disagree with the button below about
-			 * which browser to open.
+			 * reader of the settings and the toggle above cannot disagree with the button below about which
+			 * browser to open.
 			 */}
-			<LookupField openExternal={openExternal} />
+			<LookupField openExternal={settings.openExternal} />
 		</>
 	);
 };

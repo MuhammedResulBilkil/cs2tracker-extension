@@ -155,7 +155,7 @@ as an optional dependency either way. The file exists to keep the exit code at z
 
 ## Traps
 
-These six have all cost real time. Each of them fails silently.
+These eight have all cost real time. Each of them fails silently.
 
 ### The JSON module is `json`, and a type stub is not evidence
 
@@ -206,27 +206,83 @@ Without it, Millennium never loads `webkit.js`. Nothing errors. The frontend pan
 the toggles persist, and no button is ever injected into any page — which reads exactly like a
 selector bug and sends you looking in `webkit/inject-profile.ts` for a fault that is in the manifest.
 
-### `usePluginConfig` and `callable` must stay literal, in-place calls
+### `callable` must stay a literal, in-place call
 
-`@steambrew/ttc` rewrites both call sites at build time to inject the plugin name as a hidden first
-argument. The built output is `usePluginConfig(pluginName, key)` and `callable(pluginName, "GetSettings")`.
+`@steambrew/ttc` rewrites the call site at build time to inject the plugin name as a hidden first
+argument. The built output is `callable(pluginName, "GetSettings")`.
 
 The rewrite matches on the **callee's literal member path**. So all of these lose it:
 
 ```ts
-const cfg = usePluginConfig;        // aliased
+const rpc = callable;               // aliased
 const { callable: rpc } = pkg;      // destructured
-function read(hook) { hook(key); }  // passed along
-const wrapped = (k) => usePluginConfig(k);  // wrapped — the inner call is fine, the outer is not
+function bind(fn) { fn('GetSettings'); }    // passed along
+const wrapped = (n) => callable(n);         // wrapped — the inner call is fine, the outer is not
 ```
 
-Nothing throws when the injection vanishes. The arguments shift by one, so `key` lands in the
-plugin-name position and every read and write silently targets *a plugin named after the setting*.
-The user's toggles appear to work and never persist. This is why `frontend/services/settings.ts` is
-the only module in the frontend bundle that touches the config API, `webkit/settings.ts` the only one
-in the webkit bundle that binds an RPC, and why neither of them decides anything: the decidable logic
-is in `shared/` and `frontend/services/setting-value.ts` where it can be tested, and these two files
-hold nothing but the literal call and its wiring.
+Nothing throws when the injection vanishes. The arguments shift by one, so the route name lands in
+the plugin-name position and the call resolves against a plugin that does not exist. This is why
+`frontend/services/settings.ts` and `webkit/settings.ts` are the only modules in their bundles that
+bind an RPC, and why neither decides anything: the decidable logic is in `shared/` and
+`frontend/services/setting-value.ts` where it can be tested, and these two files hold nothing but the
+literal call and its wiring.
+
+The same applied to `usePluginConfig`, which this plugin no longer uses at all — see the next trap.
+
+### `callable` takes one object, and Millennium drops every argument after the first
+
+`callable(...)` returns a function that forwards `arguments[0]` and nothing else:
+
+```js
+return a.callServerMethod(pluginName, methodName, args[0], callSite)
+```
+
+The object's **keys become the Lua function's named parameters**. So a two-parameter backend function
+is bound with one object, never two positional arguments:
+
+```ts
+callable<[{ key: string; value: boolean }], string>('SetSetting')   // correct
+callable<[key: string, value: boolean], string>('SetSetting')       // `value` is silently dropped
+```
+
+`@steambrew/client` encodes this in the type — `Params extends [params: Record<string, IPCType>] | []`
+— so on the frontend the mistake does not compile. `@steambrew/webkit` is looser, and *neither* type
+can state that the keys match the backend's parameter names. When they do not, the parameter arrives
+as `nil`, a backend that validates its input rejects every call, and the feature does nothing with no
+error anywhere the user can see. `tests/backend-rpc.test.ts` checks both bundles against
+`backend/main.lua` for exactly this, along with the global-function rule above.
+
+### Millennium's `pluginConfig` read path does not answer, and its failure is swallowed
+
+The settings panel used to read and write through `usePluginConfig`, Millennium's own reactive hook
+over the same config file the Lua backend writes. **Writes landed; reads never arrived.** The panel
+therefore displayed `DEFAULT_SETTINGS` permanently, over whatever the config file actually held.
+
+That is worse than a stale display, because Steam's `Toggle` reports `onChange(!value)`. Every click
+was computed against a value that was not the stored one, so on an account whose stored settings
+differed from the defaults, clicking a switch wrote the value the user believed they were changing
+*away from* — and the switch never appeared to move, because the value it displayed had not changed.
+
+The mechanism is in Millennium's own loader, and nothing above it can detect or work around it:
+
+```js
+// the config helper — resolves, then parses
+case 0: return [4, s.call(i.PLUGIN_CONFIG, n, e, t)];
+case 1: return o = r.sent(), [2, JSON.parse(o)]
+
+// the IPC layer beneath it — resolves `undefined` rather than rejecting
+return "function" != typeof window.__private_millennium_ffi_do_not_use__
+  ? (console.error("Millennium FFI is not available in this context…"), [2])
+  : /* … send … */
+```
+
+`JSON.parse(undefined)` throws, and the hook's loader wraps that in an empty `catch {}` — so its
+state stays `undefined` with nothing logged anywhere.
+
+So **both bundles read settings over the plugin's own RPC channel** (`CALL_SERVER_METHOD`, a different
+IPC message type) rather than the config API, and the Lua backend is the single owner of settings that
+[the settings model](#the-settings-model) describes. Before this, the frontend wrote the config file
+directly while the backend believed it owned it.
 
 ### `Plugin.title` is required at runtime, and the published type omits it
 
@@ -303,20 +359,29 @@ against a running client.
 
 ### The settings model
 
-Three actors, one owner:
+Three actors, one owner, and **only the owner touches Millennium's config API**:
 
-- **The backend owns storage.** `backend/main.lua` writes the defaults through Millennium's config
-  API on load and exposes `GetSettings()` as the read path. `DEFAULT_SETTINGS` there must stay in
-  sync with `DEFAULT_SETTINGS` in `shared/settings.ts`; nothing enforces that, and a drift shows up
-  as a feature that is off by default in one runtime and on in the other.
-- **The frontend reads reactively** through `usePluginConfig`, keyed per setting. Reactive is what
-  makes it a two-line hook rather than a store: a change made by the panel, by the backend, or by
-  another mounted consumer re-renders every consumer of that key, so two controls bound to the same
-  setting cannot drift. Keyed per setting rather than whole-config because the no-argument overload
-  returns `Record<string, any>`, which would put an untyped key at every call site.
-- **The webkit bundle reads over RPC**, because **`@steambrew/webkit` does not export
-  `pluginConfig`**. That is the whole reason `GetSettings` exists as an RPC function at all. It is not
-  a design preference and it is not redundant with the frontend's path.
+- **The backend owns storage.** `backend/main.lua` is the only code in this plugin that calls
+  `millennium.config`. It writes the defaults on load and exposes the whole of the settings surface as
+  two RPCs: `GetSettings()` reads, `SetSetting(key, value)` writes one key and answers with the
+  settings as they now are. `DEFAULT_SETTINGS` there must stay in sync with `DEFAULT_SETTINGS` in
+  `shared/settings.ts`; `tests/settings-sync.test.ts` parses the Lua source and enforces it.
+  `DEFAULT_SETTINGS` doubles as the write allowlist, so `SetSetting` cannot be steered into writing
+  arbitrary keys under this plugin's name.
+- **The frontend reads and writes over the same RPCs.** `useSettings()` loads once into React state,
+  then moves a switch as soon as it is clicked and adopts the backend's reply — rolling the switch back
+  and raising a toast if the write fails. Optimistic rather than store-driven because a switch is a
+  direct manipulation: it has to follow the pointer, not an IPC round trip. The switches are disabled
+  until that first read answers, because `Toggle` reports `onChange(!value)` and a click before then is
+  computed against a default rather than the stored value.
+- **The webkit bundle reads over RPC too**, and had no choice even before the frontend joined it:
+  **`@steambrew/webkit` does not export `pluginConfig`**.
+
+The frontend used to read reactively through `usePluginConfig` instead. It does not any more, and the
+reason is not preference — reads through it never arrived, and the failure is swallowed inside
+Millennium. [The trap](#millenniums-pluginconfig-read-path-does-not-answer-and-its-failure-is-swallowed)
+has the mechanism. What that costs is cross-window reactivity, which nothing here needs: the panel is
+the only writer, it is mounted once, and webkit reads once per page load by design.
 
 The webkit bundle reads settings **once, at page load**, and does not watch for changes. So a toggle
 flipped now applies to the next page, not to the ones already open. This is surfaced in the UI
@@ -415,9 +480,10 @@ had no rule that explained the behaviour.
 These are requirements from the plugin database's review, not preferences. Each one has already
 changed how something here is written:
 
-- **Steam's own components for settings UI.** `ToggleField`, `TextField`, `Field`, `DialogButton`,
-  `Spinner`. No raw `input` or `button` anywhere in the panel, no stylesheet, and no layout of the
-  plugin's own — custom-styled settings UI is rejected, which is why the ordering of elements in
+- **Steam's own components for settings UI.** `Field` for each row, with `Toggle`, `TextField`,
+  `DialogButton` and `Spinner` as the controls inside them — which is the composition the review
+  guidance names, and `ToggleField` is not on that list. No raw `input` or `button` anywhere in the
+  panel, no stylesheet, and no layout of the plugin's own — custom-styled settings UI is rejected, which is why the ordering of elements in
   `SettingsPanel.tsx` is the whole of its layout. The one inline style in the frontend bundle is on
   the SVG mark in `frontend/assets/Icon.tsx`, which pins the icon to `1em` square with
   `flexShrink: 0`; it sizes the plugin's own glyph and styles nothing of Steam's.
@@ -541,9 +607,9 @@ directly, and they are as short as they can be:
 | Module | What it imports |
 |---|---|
 | `frontend/index.tsx` | `definePlugin`, `Plugin` |
-| `frontend/components/SettingsPanel.tsx` | `ToggleField` |
+| `frontend/components/SettingsPanel.tsx` | `Field`, `Toggle` |
 | `frontend/components/LookupField.tsx` | `DialogButton`, `Field`, `Spinner`, `TextField` |
-| `frontend/services/settings.ts` | `toaster`, `usePluginConfig` |
+| `frontend/services/settings.ts` | `callable`, `toaster` |
 | `frontend/services/steamid.ts` | `callable` |
 | `webkit/settings.ts` | `callable` |
 
