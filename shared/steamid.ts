@@ -1,11 +1,28 @@
 const STEAMID64_BASE = BigInt('76561197960265728');
-const STEAMID64_PATTERN = /^7656119\d{10}$/;
 const VANITY_PATTERN = /^[A-Za-z0-9_-]{2,32}$/;
 
 /** Steam account ids are unsigned 32-bit, so 1..4294967295 is the whole legal range. */
 const ACCOUNT_ID_PATTERN = /^\d{1,10}$/;
 const ACCOUNT_ID_MIN = BigInt(1);
 const ACCOUNT_ID_MAX = BigInt('4294967295');
+
+/*
+ * An individual SteamID64 is exactly STEAMID64_BASE plus a legal account id, so the valid interval
+ * is 76561197960265729..76561202255233023 inclusive. The bounds are derived from the account id
+ * range above rather than written out, so the two functions here cannot disagree about it.
+ *
+ * A digit-prefix test cannot express that interval. `^7656119\d{10}$` was wrong at both ends: it
+ * accepted everything from 76561190000000000 up, which is below the base and so not an account at
+ * all, and it rejected every id from account 2039734272 onward, where the prefix rolls over to
+ * 7656120. Task 8 validates `data-steamid` values that Steam itself produced, so the second half
+ * would have silently dropped friend badges as account ids grew past that point.
+ *
+ * Comparison is BigInt, not Number: 76561202255233023 and 76561202255233024 both round to the same
+ * double, so a Number check literally cannot tell the upper bound from one past it.
+ */
+const STEAMID64_SHAPE = /^\d{17}$/;
+const STEAMID64_MIN = STEAMID64_BASE + ACCOUNT_ID_MIN;
+const STEAMID64_MAX = STEAMID64_BASE + ACCOUNT_ID_MAX;
 
 /*
  * Both URL patterns are anchored at both ends of the interesting segment:
@@ -25,8 +42,15 @@ export type LookupTarget =
 	| { kind: 'vanity'; value: string }
 	| { kind: 'invalid' };
 
+/**
+ * True only for a SteamID64 in the individual-account range.
+ * The shape test runs first so the function stays total: `BigInt` throws on a non-numeric string,
+ * and it silently accepts padding and a leading `+`, either of which would otherwise validate.
+ */
 export function isSteamId64(value: string): boolean {
-	return STEAMID64_PATTERN.test(value);
+	if (!STEAMID64_SHAPE.test(value)) return false;
+	const id = BigInt(value);
+	return id >= STEAMID64_MIN && id <= STEAMID64_MAX;
 }
 
 /**

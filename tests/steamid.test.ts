@@ -6,7 +6,7 @@ describe('isSteamId64', () => {
 		expect(isSteamId64('76561198145891996')).toBe(true);
 	});
 
-	it('rejects a 17-digit number outside the Steam range', () => {
+	it('rejects a 17-digit number below the Steam range', () => {
 		expect(isSteamId64('12345678901234567')).toBe(false);
 	});
 
@@ -14,6 +14,30 @@ describe('isSteamId64', () => {
 		expect(isSteamId64('7656119814589')).toBe(false);
 		expect(isSteamId64('76561198145891996x')).toBe(false);
 		expect(isSteamId64('')).toBe(false);
+	});
+
+	// The valid interval is STEAMID64_BASE + 1 through STEAMID64_BASE + 4294967295. Pinned here as
+	// literals so the bounds the implementation derives cannot drift without a test noticing.
+	it('accepts the exact lower bound and rejects the base beneath it', () => {
+		expect(isSteamId64('76561197960265729')).toBe(true);
+		expect(isSteamId64('76561197960265728')).toBe(false);
+	});
+
+	it('accepts the exact upper bound and rejects one past it', () => {
+		expect(isSteamId64('76561202255233023')).toBe(true);
+		expect(isSteamId64('76561202255233024')).toBe(false);
+	});
+
+	// A digit-prefix check accepts anything starting 7656119, which includes ids beneath the base.
+	it('rejects a below-base value that a 7656119 prefix check would accept', () => {
+		expect(isSteamId64('76561190000000000')).toBe(false);
+	});
+
+	// BigInt(' 123 ') and BigInt('+123') both parse, so the shape test has to run first or padded
+	// input would validate. BigInt('123x') throws, so that test also keeps this function total.
+	it('rejects padded and signed forms instead of parsing them', () => {
+		expect(isSteamId64(' 76561198145891996 ')).toBe(false);
+		expect(isSteamId64('+76561198145891996')).toBe(false);
 	});
 });
 
@@ -43,6 +67,18 @@ describe('accountIdToSteamId64', () => {
 		expect(accountIdToSteamId64('4294967296')).toBeNull();
 		expect(accountIdToSteamId64('99999999999999999999')).toBeNull();
 	});
+
+	// The consumer pattern in Tasks 5-8: convert a data-miniprofile id, then validate the result.
+	// 2039734272 is the account id where the old 7656119 digit prefix rolled over to 7656120 and
+	// started rejecting ids Steam legitimately emits.
+	it.each(['1', '185626268', '2039734272', '4294967295'])(
+		'converts account id %s into a value isSteamId64 accepts',
+		(accountId) => {
+			const steamId64 = accountIdToSteamId64(accountId);
+			expect(steamId64).not.toBeNull();
+			expect(isSteamId64(String(steamId64))).toBe(true);
+		},
+	);
 });
 
 describe('parseLookupInput', () => {
