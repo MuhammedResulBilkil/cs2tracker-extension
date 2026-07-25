@@ -74,6 +74,9 @@ function ResolveVanity(vanity)
     local response, err = http.get(url, {
         timeout = REQUEST_TIMEOUT_SECONDS,
         follow_redirects = true,
+        -- Already the library default; stated explicitly so that an audit of this
+        -- request does not have to go read the http module to confirm it.
+        verify_ssl = true,
     })
 
     if not response then
@@ -81,10 +84,19 @@ function ResolveVanity(vanity)
         return ""
     end
 
-    if response.status ~= 200 or type(response.body) ~= "string" then
+    -- Logged because a throttled or broken Steam is otherwise indistinguishable from a
+    -- vanity that simply does not exist: both just make the link fail to appear.
+    if response.status ~= 200 then
+        logger:warn(LOG_PREFIX .. "vanity lookup returned HTTP " .. tostring(response.status))
         return ""
     end
 
+    if type(response.body) ~= "string" then
+        logger:warn(LOG_PREFIX .. "vanity lookup returned no body")
+        return ""
+    end
+
+    -- A vanity with no match is a normal outcome, not a fault, so it stays quiet.
     local steam_id = response.body:match("<steamID64>(%d+)</steamID64>")
     if steam_id and #steam_id == 17 then
         return steam_id
@@ -95,12 +107,16 @@ end
 
 local function on_load()
     local ok, err = pcall(apply_default_settings)
+
+    -- Signal ready before anything else can fail, including the logging below. If on_load
+    -- dies before this line Millennium waits forever, and a hung Steam client leaves the
+    -- user nothing to diagnose it from.
+    millennium.ready()
+
     if not ok then
         logger:error(LOG_PREFIX .. "failed to apply default settings: " .. tostring(err))
     end
 
-    -- Always signal ready, even if defaults failed, or Millennium waits forever.
-    millennium.ready()
     logger:info(LOG_PREFIX .. "loaded")
 end
 
