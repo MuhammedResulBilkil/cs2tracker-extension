@@ -39,8 +39,22 @@ export const LOOKUP_MESSAGES = {
 	unparseable: 'That does not look like a SteamID64, a profile URL, or a custom URL name.',
 	notFound: 'No Steam profile matches that name. Check the spelling, or paste the profile URL instead.',
 	lookupFailed: 'Could not reach Steam to look that name up. Check your connection and try again.',
+	timedOut: 'Steam did not answer in time. Try again in a moment.',
 	noCurrentUser: 'Your own Steam ID is not available yet. Try again in a moment.',
 } as const;
+
+/**
+ * How long to wait for the backend before giving up on a vanity lookup.
+ *
+ * Longer than the 10-second HTTP timeout backend/main.lua sets on its own request, and deliberately so: a
+ * shorter deadline would report "Steam did not answer" while the backend was still inside a request that
+ * was about to succeed, and the retry that message invites would start the same ten seconds over.
+ *
+ * The remaining five seconds cover the IPC round trip either side of that request. The ceiling is the
+ * user's patience rather than a protocol limit -- past half a minute they have already concluded the
+ * plugin is broken.
+ */
+export const LOOKUP_TIMEOUT_MS = 15_000;
 
 /**
  * The outcome of one lookup: an id to open, or a sentence to show under the field.
@@ -88,6 +102,40 @@ function report(onFailure: ((error: unknown) => void) | undefined, error: unknow
 }
 
 /**
+ * What the deadline resolves with. A unique symbol rather than a rejection, because a rejection would be
+ * indistinguishable from the backend's own failure and the two need different messages -- "did not answer"
+ * invites a retry, while "could not reach Steam" points at the connection. A symbol also cannot collide
+ * with any value the IPC channel could carry, which `null` or a sentinel string could.
+ */
+const TIMED_OUT = Symbol('lookup timed out');
+
+/**
+ * Race a promise against a deadline, answering with TIMED_OUT if the deadline wins.
+ *
+ * This is the only defence against a call that neither resolves nor rejects, which no try/catch can cover:
+ * an IPC channel that dropped its response leaves the await pending forever, and the panel's busy flag
+ * with it, so both buttons stay disabled until the whole page is reopened. A hang is the one failure a
+ * user cannot retry their way out of.
+ *
+ * The timer is cleared in a finally rather than left to expire. Every lookup would otherwise park a
+ * fifteen-second timer for the rest of the session, and in a test runner an outstanding timer outlives the
+ * test that created it.
+ */
+async function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T | typeof TIMED_OUT> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			work,
+			new Promise<typeof TIMED_OUT>((resolve) => {
+				timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/**
  * Turn what the user typed into either an id to open or a sentence explaining why not. Total: every
  * input and every backend answer produces a LookupResult, and nothing here throws.
  *
@@ -104,17 +152,23 @@ function report(onFailure: ((error: unknown) => void) | undefined, error: unknow
  * Everything from the call onwards is inside the try, including the call itself: a rejection is the
  * documented failure, but the implementation behind resolveVanity is injected by the Millennium runtime
  * rather than the stub this repo compiles against, so a synchronous throw has to answer the same way.
- * `await` covers the third shape -- a resolver that answers without a promise -- at no cost to the
- * ordinary path.
+ * Promise.resolve covers the third shape -- a resolver that answers without a promise -- and is a no-op on
+ * a real promise. The fourth shape is a call that never settles at all, which no try/catch can reach and
+ * which withTimeout above exists for; its message is its own, because "did not answer" invites a retry
+ * while "could not reach Steam" points at the connection.
+ *
+ * timeoutMs is a parameter with a default rather than a constant read inside, so a test can use a
+ * five-millisecond deadline instead of waiting out the real one.
  *
  * onFailure fires only for a fault, never for a profile that simply does not exist. That distinction is
  * the entire value of it: a hook that also fired for a misspelt name would train its reader to ignore
- * it, which is the rule parseSettings' onProblem follows for an empty config.
+ * it, which is the rule parseSettings' onProblem follows for an empty config. A timeout is a fault.
  */
 export async function resolveLookupTarget(
 	raw: string,
 	resolveVanity: (vanity: string) => Promise<unknown>,
 	onFailure?: (error: unknown) => void,
+	timeoutMs: number = LOOKUP_TIMEOUT_MS,
 ): Promise<LookupResult> {
 	const target = parseLookupInput(raw);
 	if (target.kind === 'invalid') return { kind: 'error', message: LOOKUP_MESSAGES.unparseable };
@@ -129,10 +183,17 @@ export async function resolveLookupTarget(
 
 	let answer: unknown;
 	try {
-		answer = await resolveVanity(target.value);
+		answer = await withTimeout(Promise.resolve(resolveVanity(target.value)), timeoutMs);
 	} catch (error) {
 		report(onFailure, error);
 		return { kind: 'error', message: LOOKUP_MESSAGES.lookupFailed };
+	}
+
+	if (answer === TIMED_OUT) {
+		// Fabricated rather than caught, because a hang produces no error of its own -- and the duration is
+		// the only detail that makes a timeout worth reading about in a log.
+		report(onFailure, new Error(`ResolveVanity did not answer within ${timeoutMs}ms`));
+		return { kind: 'error', message: LOOKUP_MESSAGES.timedOut };
 	}
 
 	const steamId64 = normalizeSteamId(answer);

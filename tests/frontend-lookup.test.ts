@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	LOOKUP_HINT,
 	LOOKUP_MESSAGES,
+	LOOKUP_TIMEOUT_MS,
 	currentUserResult,
 	normalizeSteamId,
 	readCurrentUserSteamId,
@@ -187,6 +188,57 @@ describe('resolveLookupTarget', () => {
 		expect(onFailure).not.toHaveBeenCalled();
 	});
 
+	/**
+	 * The liveness case, and the one a try/catch cannot cover: a call that neither resolves nor rejects.
+	 * Without the race the await never returns, the panel's busy flag is never cleared, and both buttons
+	 * stay disabled for the lifetime of the panel -- a hang is the one failure the user cannot retry out
+	 * of. A never-settling promise is exactly what an IPC channel that dropped the response looks like.
+	 */
+	it('gives up on a backend that never answers', async () => {
+		await expect(resolveLookupTarget('gaben', () => new Promise(() => {}), undefined, 5)).resolves.toEqual({
+			kind: 'error',
+			message: LOOKUP_MESSAGES.timedOut,
+		});
+	});
+
+	// A hang is a fault, not a misspelt name, so it is written down like the other faults -- and the log
+	// line is the only place the duration is ever stated.
+	it('reports a timeout through the hook', async () => {
+		const onFailure = vi.fn();
+
+		await resolveLookupTarget('gaben', () => new Promise(() => {}), onFailure, 5);
+
+		expect(onFailure).toHaveBeenCalledTimes(1);
+		expect(onFailure.mock.calls[0][0]).toBeInstanceOf(Error);
+		expect((onFailure.mock.calls[0][0] as Error).message).toMatch(/5ms/);
+	});
+
+	// The other half of the race: a backend that answers, slowly but in time, must still win. Inverting
+	// the race or racing against zero would fail here and nowhere else.
+	it('waits for a slow answer that arrives before the deadline', async () => {
+		const resolve = () => new Promise<string>((done) => setTimeout(() => done(ID), 5));
+
+		await expect(resolveLookupTarget('gaben', resolve, undefined, 500)).resolves.toEqual({
+			kind: 'found',
+			steamId64: ID,
+		});
+	});
+
+	/**
+	 * The timer is cleared once the answer arrives, so a resolved lookup leaves nothing pending. Without
+	 * this, every lookup in a session parks a fifteen-second timer -- which is also the thing that keeps a
+	 * test runner alive past the end of the test that started it.
+	 */
+	it('leaves no timer running once the backend answers', async () => {
+		vi.useFakeTimers();
+		try {
+			await expect(resolveLookupTarget('gaben', async () => ID)).resolves.toEqual({ kind: 'found', steamId64: ID });
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	// A diagnostic must never change the answer, and here a throw from it would become the unhandled
 	// rejection the try/catch exists to prevent.
 	it('survives a hook that throws', async () => {
@@ -275,6 +327,7 @@ describe('LOOKUP_MESSAGES', () => {
 		expect(LOOKUP_MESSAGES.unparseable).toMatch(/does not look like/i);
 		expect(LOOKUP_MESSAGES.notFound).toMatch(/no steam profile/i);
 		expect(LOOKUP_MESSAGES.lookupFailed).toMatch(/could not reach steam/i);
+		expect(LOOKUP_MESSAGES.timedOut).toMatch(/did not answer/i);
 		expect(LOOKUP_MESSAGES.noCurrentUser).toMatch(/not available yet/i);
 	});
 
@@ -283,5 +336,20 @@ describe('LOOKUP_MESSAGES', () => {
 	it('keeps the resting hint distinct from every failure', () => {
 		expect(LOOKUP_HINT).toMatch(/steamid64/i);
 		expect(Object.values(LOOKUP_MESSAGES)).not.toContain(LOOKUP_HINT);
+	});
+});
+
+describe('LOOKUP_TIMEOUT_MS', () => {
+	/**
+	 * It has to outlast the backend's own HTTP timeout, which backend/main.lua sets to 10 seconds. Give up
+	 * sooner and the panel would report "Steam did not answer" while the backend was still inside a request
+	 * that was about to succeed -- and the retry the message invites would start the same ten seconds again.
+	 *
+	 * The upper bound is a patience limit rather than a protocol one: past about half a minute a user has
+	 * concluded the plugin is broken, so there is no point waiting longer than they will.
+	 */
+	it('outlasts the backend HTTP timeout it is waiting on', () => {
+		expect(LOOKUP_TIMEOUT_MS).toBeGreaterThan(10_000);
+		expect(LOOKUP_TIMEOUT_MS).toBeLessThanOrEqual(30_000);
 	});
 });

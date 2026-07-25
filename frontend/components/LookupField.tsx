@@ -6,17 +6,24 @@ import { getCurrentUserProfile, openCs2TrackerProfile, resolveLookupInput } from
 /**
  * Open any player's CS2Tracker page from the settings panel.
  *
- * Deliberately thin, and thin in a specific direction: no component in this bundle can be imported by a
- * test -- @steambrew/client cannot load outside the Steam client -- so everything here that could be a
- * decision has been moved into frontend/services/lookup.ts instead. Which sentence a failure shows, what
- * counts as a usable SteamID64, and whether the signed-in user's id is readable yet are all decided
- * there and covered by tests/frontend-lookup.test.ts. What is left is three pieces of local state and a
- * tree of Steam's own components.
+ * As thin as it can be, in a specific direction: no component in this bundle can be imported by a test --
+ * @steambrew/client cannot load outside the Steam client -- so every decision that could be moved out has
+ * been. Which sentence a failure shows, what counts as a usable SteamID64, how long to wait for the
+ * backend and whether the signed-in user's id is readable yet all live in frontend/services/lookup.ts,
+ * covered by tests/frontend-lookup.test.ts.
+ *
+ * Two decisions do remain here, because both are about this component's own render cycle and neither can
+ * be expressed anywhere else: the single-flight guard below, and when a lookup is allowed to start at all
+ * (`canLookup`). Both are untestable in this repo and are named in the Task 16 verification list rather
+ * than pretended away.
  *
  * Every control is a Steam component: TextField, Field, DialogButton and Spinner, with no raw input or
- * button, no className of this plugin's own and no inline style. That is a store-review requirement
- * rather than a preference -- the plugin database rejects custom-styled settings UI -- and it is also why
- * the layout is expressed as Steam field rows and their separators instead of a flex container.
+ * button, no className of this plugin's own and no inline style. That is a store-review requirement rather
+ * than a preference, and it is a requirement about *custom* styling: what the plugin database rejects is UI
+ * this plugin styles itself, not a Steam component's own declared props. Layout is therefore expressed
+ * through those props -- inlineControls puts the primary button in the field's own control slot, and
+ * bottomSeparator groups the rows -- and never through CSS. The one raw element is a span carrying
+ * aria-live, for which Steam ships no component at all; it renders no control and carries no styling.
  *
  * The field carries no placeholder, and that is a limit of the component rather than a choice: Steam's
  * TextFieldProps extends React's HTMLAttributes rather than InputHTMLAttributes, so placeholder is not
@@ -48,9 +55,9 @@ export const LookupField = ({ openExternal }: LookupFieldProps) => {
 	const inFlight = useRef(false);
 
 	/**
-	 * One place where a result becomes something the user sees, for both buttons. The error is cleared
-	 * only on success, so a stale message cannot outlive the failure that produced it while still being
-	 * replaced by the next one.
+	 * One place where a result becomes something the user sees, for both buttons. It sets the message on a
+	 * failure and clears it on success; the two places that clear it besides are the start of an attempt
+	 * and any edit to the field, so a message is only ever on screen while it is still true.
 	 */
 	const apply = (result: LookupResult): void => {
 		if (result.kind === 'error') {
@@ -88,29 +95,69 @@ export const LookupField = ({ openExternal }: LookupFieldProps) => {
 		<>
 			<TextField
 				label="Look up a player"
-				description={error ?? LOOKUP_HINT}
+				/*
+				 * A live region, so a failure is announced rather than silently swapped into place. It has
+				 * to be the wrapper and not the message, because a region announces changes to its own
+				 * contents: the span is always mounted, holding the hint, and only its text changes.
+				 *
+				 * polite rather than assertive -- the user has just pressed a button and is waiting for
+				 * exactly this, so there is nothing to interrupt.
+				 *
+				 * A failed lookup stays here rather than becoming a toast, and the asymmetry with a failed
+				 * settings write is deliberate: a mistyped name is an ordinary outcome of using the field,
+				 * and a Steam notification for ordinary user error is noise. A write that fails is a fault
+				 * the user did not cause, which is why that one gets the notification.
+				 */
+				description={<span aria-live="polite">{error ?? LOOKUP_HINT}</span>}
 				value={input}
 				disabled={busy}
 				bShowClearAction
-				onChange={(event) => setInput(event.target.value)}
-				onKeyDown={(event) => {
-					// Enter is what anyone types after filling in a single-field form, and without this it
-					// would submit Steam's surrounding dialog instead of running the lookup.
-					if (event.key === 'Enter' && canLookup) void lookup();
+				onChange={(event) => {
+					setInput(event.target.value);
+					// Clear on edit, not merely on the next attempt. The message occupies the description
+					// slot, which is the only place the format example lives now that the field has no
+					// placeholder -- so a user who clears the field to start over would otherwise be left
+					// with a failure where the guidance should be.
+					setError(null);
 				}}
+				onKeyDown={(event) => {
+					// Enter is what anyone types after filling in a single-field form. Both stoppers are
+					// needed for that to mean anything: preventDefault drops the implicit submit, and
+					// stopPropagation keeps the key from reaching the Steam dialog wrapped around this
+					// panel, which would act on it as well. Only when a lookup actually starts -- swallowing
+					// the key while the field is empty would make Enter dead rather than considered.
+					if (event.key !== 'Enter' || !canLookup) return;
+					event.preventDefault();
+					event.stopPropagation();
+					void lookup();
+				}}
+				/*
+				 * Steam's own slot for a control that belongs to the field, which is where the primary
+				 * action belongs: it acts on this input, and putting it here removes the label-less Field
+				 * row -- and its empty label column -- that it used to sit in.
+				 */
+				inlineControls={
+					<DialogButton
+						disabled={!canLookup}
+						onClick={() => void lookup()}
+						/*
+						 * The name survives the spinner. While busy the button's only child is an icon, so
+						 * without this it would be an unnamed button and a screen reader would announce
+						 * nothing at the moment something starts. Identical to the visible label, so the
+						 * two never disagree. An ARIA attribute is not styling.
+						 */
+						aria-label="Open on CS2Tracker"
+					>
+						{/*
+						 * The spinner replaces the label rather than joining it, which keeps the button one
+						 * child wide in both states. Sized by SVG width and height attributes -- the
+						 * asset's own dimensions, not CSS applied to a Steam component -- because this icon
+						 * has no intrinsic size and would otherwise stretch to whatever the button gives it.
+						 */}
+						{busy ? <Spinner width={16} height={16} /> : 'Open on CS2Tracker'}
+					</DialogButton>
+				}
 			/>
-			<Field bottomSeparator="none" focusable={false}>
-				<DialogButton disabled={!canLookup} onClick={() => void lookup()}>
-					{/*
-					 * The spinner replaces the label rather than joining it: two children in one button
-					 * would need a gap between them, and a gap is layout this plugin is not allowed to
-					 * style. Sized by SVG width and height attributes, which are the asset's own
-					 * dimensions rather than CSS applied to a Steam component -- without them the icon
-					 * has no intrinsic size and stretches to whatever the button gives it.
-					 */}
-					{busy ? <Spinner width={16} height={16} /> : 'Open on CS2Tracker'}
-				</DialogButton>
-			</Field>
 			<Field
 				label="Your own stats"
 				description="Opens the CS2Tracker page for the account signed in to Steam."
