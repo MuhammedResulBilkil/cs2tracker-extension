@@ -16,9 +16,10 @@ const BUTTON_LABEL = 'CS2Tracker.gg';
  * Add the CS2Tracker button to a Steam community profile page.
  * Returns true only when a button was actually added.
  *
- * The return value is the signal a retry loop reads, so "false" has to mean "nothing is in the
- * document" for every one of its reasons -- no column yet, already injected, unknown profile, or the
- * slot detached while we were resolving -- and never "added, probably".
+ * The return value is the signal a retry loop reads, so "false" has to mean "nothing of ours is in the
+ * document" for every one of its reasons -- no column yet, already injected, unknown profile, the slot
+ * detached while we were resolving, or something threw -- and never "added, probably". Equally, the
+ * promise does not reject: a rejection would be a sixth outcome meaning the opposite of the other five.
  */
 export async function injectProfileButton(doc: Document, win: unknown, openExternal: boolean): Promise<boolean> {
 	const column = doc.querySelector(RIGHT_COLUMN_SELECTOR);
@@ -32,6 +33,35 @@ export async function injectProfileButton(doc: Document, win: unknown, openExter
 	container.className = `account-row ${PROFILE_CONTAINER_CLASS}`;
 	column.insertBefore(container, column.children[1] ?? null);
 
+	try {
+		return await buildButton(doc, win, openExternal, container);
+	} catch (error) {
+		// buildButton runs with the container already in the page, so a throw inside it used to reject with
+		// an empty account-row still in Steam's sidebar -- and the guard above would then read that
+		// leftover as "already injected" and refuse every later attempt on the page. Unwinding exactly as
+		// an unresolved SteamID does is what keeps the docblock's promise true for this outcome too. The
+		// realistic source is `new DOMParser()` in createIcon, which sits outside that module's null guards
+		// and so throws rather than returning null on a host without it.
+		//
+		// The stylesheet is deliberately not torn down here. It is shared with the friend-row badges, so
+		// removing it could unstyle an injection that has nothing to do with this failure.
+		console.error('[CS2Tracker] Profile button injection failed:', error);
+		container.remove();
+		return false;
+	}
+}
+
+/**
+ * The half that runs with a container already in the document. Split out so the caller's try/catch has
+ * one obvious span rather than wrapping the guards that must not be caught -- a missing column and an
+ * already-injected page are answers, not failures.
+ */
+async function buildButton(
+	doc: Document,
+	win: unknown,
+	openExternal: boolean,
+	container: Element,
+): Promise<boolean> {
 	const steamId = await resolveProfileSteamId(doc, win);
 	if (!steamId) {
 		// The reserved slot has to go back, and the reason that outranks appearance is the guard above:

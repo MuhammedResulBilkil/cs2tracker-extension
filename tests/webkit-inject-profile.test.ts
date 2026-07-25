@@ -3,13 +3,43 @@ import { PROFILE_CONTAINER_CLASS, injectProfileButton, removeProfileButton } fro
 
 const PROFILE_WINDOW = { g_rgProfileData: { steamid: '76561198145891996' } };
 
-function setupProfilePage(): Element {
-	document.body.innerHTML = `
+/** Takes the target document so the two-document cases can build the same fixture somewhere else. */
+function setupProfilePage(doc: Document = document): Element {
+	doc.body.innerHTML = `
 		<div class="profile_rightcol">
 			<div class="persona"></div>
 			<div class="responsive_status_info"></div>
 		</div>`;
-	return document.querySelector('.profile_rightcol')!;
+	return doc.querySelector('.profile_rightcol')!;
+}
+
+/**
+ * For the two cases whose SteamID never resolves. Neither one actually reaches the network, and that is
+ * worth stating because the shape of the test suggests otherwise: happy-dom's ambient location is
+ * http://localhost:3000/, which resolveProfileSteamId classifies as "not a profile root", so it returns
+ * null at that gate and never gets as far as its ?xml=1 fallback. Measured at zero fetch calls, not
+ * assumed. So this stub is inert today, and the ?xml=1 branch is covered by tests/webkit-steamid.test.ts
+ * rather than here.
+ *
+ * It is kept for the reason that file documents at length: happy-dom's own fetch prints a cross-origin
+ * warning even when the rejection is caught, so an unstubbed reach pollutes the output without failing
+ * anything. If the ambient location or the resolution order ever changes, this is what keeps these two
+ * tests quiet instead of noisy.
+ */
+const stubOfflineFetch = () => vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+
+/** The parser stub from tests/webkit-icon.test.ts, which is the only way to make createIcon return null. */
+function stubBrokenParser(): void {
+	const broken = new DOMParser().parseFromString('<svg><path d="M0 0"></svg>', 'image/svg+xml');
+	expect(broken.documentElement.querySelector('parsererror')).not.toBeNull();
+	vi.stubGlobal(
+		'DOMParser',
+		class {
+			parseFromString() {
+				return broken;
+			}
+		},
+	);
 }
 
 beforeEach(() => {
@@ -17,8 +47,12 @@ beforeEach(() => {
 	document.body.innerHTML = '';
 });
 
+// restoreAllMocks as well as unstubAllGlobals: the throwing case silences console.error and the
+// two-document case spies on the ambient document's importNode, and either spy left installed would
+// distort whatever test ran next.
 afterEach(() => {
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 describe('injectProfileButton', () => {
@@ -66,7 +100,7 @@ describe('injectProfileButton', () => {
 	});
 
 	it('removes its placeholder when the SteamID cannot be resolved', async () => {
-		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+		stubOfflineFetch();
 		setupProfilePage();
 		await expect(injectProfileButton(document, {}, false)).resolves.toBe(false);
 		expect(document.querySelector(`.${PROFILE_CONTAINER_CLASS}`)).toBeNull();
@@ -101,9 +135,96 @@ describe('injectProfileButton', () => {
 	 * must be left exactly as it was found, container and stylesheet both.
 	 */
 	it('does not style a document it declines to touch', async () => {
-		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+		stubOfflineFetch();
 		setupProfilePage();
 		await injectProfileButton(document, {}, false);
+		expect(document.getElementById('cs2tracker-extension-style')).toBeNull();
+	});
+
+	/**
+	 * createIcon returns null when the icon markup will not parse, and the contract for that is "degraded
+	 * but usable" -- a text-labelled button with no icon, never an abort. Nothing pinned it: mutating the
+	 * guard to `if (!icon) return false;`, which is exactly the abort the spec forbids, passed this entire
+	 * file, because the icon is built from a static constant that always parses under happy-dom. Forcing
+	 * the null needs no module mock, only the parser stub tests/webkit-icon.test.ts already uses.
+	 *
+	 * The label is asserted alongside the missing icon because the icon is aria-hidden: the label is the
+	 * button's entire accessible name, so a button that lost both would be unreachable rather than plain.
+	 */
+	it('keeps a usable button when the icon cannot be built', async () => {
+		stubBrokenParser();
+		setupProfilePage();
+
+		await expect(injectProfileButton(document, PROFILE_WINDOW, false)).resolves.toBe(true);
+		const link = document.querySelector('a.cs2tracker-btn');
+		expect(link).not.toBeNull();
+		expect(link!.textContent).toContain('CS2Tracker.gg');
+		expect(link!.querySelector('.cs2tracker-btn__icon')).toBeNull();
+	});
+
+	/**
+	 * The container is inserted before the SteamID lookup is awaited, so a throw anywhere after that point
+	 * used to reject with an empty account-row still in Steam's sidebar -- and the idempotency guard would
+	 * then read that leftover as "already injected" and refuse every later attempt on the page. The
+	 * realistic source is `new DOMParser()` in createIcon, which sits outside that module's null guards
+	 * and so throws rather than returning null on a host that lacks it. Blink has DOMParser, so this is
+	 * remote; the point is that rejection was a fifth outcome meaning the opposite of the other four.
+	 *
+	 * The retry at the end is the real assertion, because unwinding only matters if it leaves the page
+	 * injectable again. The console spy keeps the suite's output clean and doubles as the check that the
+	 * failure is reported rather than silently swallowed.
+	 */
+	it('unwinds and stays retryable when injection throws', async () => {
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		vi.stubGlobal(
+			'DOMParser',
+			class {
+				constructor() {
+					throw new Error('no DOMParser on this host');
+				}
+			},
+		);
+		setupProfilePage();
+
+		await expect(injectProfileButton(document, PROFILE_WINDOW, false)).resolves.toBe(false);
+		expect(document.querySelector(`.${PROFILE_CONTAINER_CLASS}`)).toBeNull();
+		expect(logged).toHaveBeenCalledOnce();
+
+		vi.unstubAllGlobals();
+		await expect(injectProfileButton(document, PROFILE_WINDOW, false)).resolves.toBe(true);
+	});
+
+	/**
+	 * Every other case here passes the ambient document, which leaves all of this module's `doc` uses
+	 * satisfied by the global `document` and therefore unpinned -- swapping any one of them keeps the file
+	 * green. Not hypothetical: webkit/styles.ts documents that this bundle runs against a separate
+	 * document per community page, which is what the entry point will hand in, and webkit/icon.ts
+	 * documents that a node built against the wrong document throws WrongDocumentError on insert in a real
+	 * browser. Both sibling modules already have this test; it was not carried over.
+	 *
+	 * The importNode spy is what pins createIcon's argument specifically, and it is a spy rather than a
+	 * DOM assertion for a measured reason: happy-dom adopts a foreign node on insert, recursively and
+	 * without throwing, so with createIcon(document, ...) the icon and all five of its paths still report
+	 * `other` once appended. Adoption launders every ownerDocument downstream, so which document was
+	 * asked to build the node is the only thing left to observe.
+	 */
+	it('operates on the document it is given, not the ambient one', async () => {
+		const other = document.implementation.createHTMLDocument('other');
+		const column = setupProfilePage(other);
+		const ambientImportNode = vi.spyOn(document, 'importNode');
+
+		await expect(injectProfileButton(other, PROFILE_WINDOW, false)).resolves.toBe(true);
+
+		const link = other.querySelector('a.cs2tracker-btn');
+		expect(link).not.toBeNull();
+		expect(link!.ownerDocument).toBe(other);
+		expect(link!.querySelector('.cs2tracker-btn__icon')).not.toBeNull();
+		expect(column.children[1].classList.contains(PROFILE_CONTAINER_CLASS)).toBe(true);
+		expect(other.getElementById('cs2tracker-extension-style')).not.toBeNull();
+		expect(ambientImportNode).not.toHaveBeenCalled();
+
+		expect(document.querySelector('a.cs2tracker-btn')).toBeNull();
+		expect(document.querySelector(`.${PROFILE_CONTAINER_CLASS}`)).toBeNull();
 		expect(document.getElementById('cs2tracker-extension-style')).toBeNull();
 	});
 });
@@ -139,5 +260,23 @@ describe('removeProfileButton', () => {
 
 		removeProfileButton(document);
 		expect(document.querySelectorAll(`.${PROFILE_CONTAINER_CLASS}`)).toHaveLength(0);
+	});
+
+	/**
+	 * The mirror of the injector's two-document case, and the sibling module records this exact mutation
+	 * surviving a whole suite: tests/webkit-styles.test.ts notes that removeStyles reading the ambient
+	 * document instead of the one it was handed passed every test until a two-document case was added.
+	 * Teardown stripping the wrong page's button is the same defect one module over.
+	 */
+	it('removes from the document it is given and leaves the others alone', async () => {
+		const other = document.implementation.createHTMLDocument('other');
+		setupProfilePage();
+		setupProfilePage(other);
+		await injectProfileButton(document, PROFILE_WINDOW, false);
+		await injectProfileButton(other, PROFILE_WINDOW, false);
+
+		removeProfileButton(other);
+		expect(other.querySelector(`.${PROFILE_CONTAINER_CLASS}`)).toBeNull();
+		expect(document.querySelector(`.${PROFILE_CONTAINER_CLASS}`)).not.toBeNull();
 	});
 });
