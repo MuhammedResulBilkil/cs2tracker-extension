@@ -15,6 +15,14 @@ import { guardSettingWrite, resolveSetting } from './setting-value';
  * ./setting-value.ts, which imports nothing from Steam and is covered by
  * tests/frontend-setting-value.test.ts. What is left below is the hook call, the wiring, and one
  * console line.
+ *
+ * Do not alias, destructure, wrap, or pass along usePluginConfig. It must stay a literal
+ * `usePluginConfig(...)` call on the imported binding, in this file. Millennium's transpiler rewrites
+ * that call site to inject the plugin name as a first argument -- verified in the built output as
+ * `usePluginConfig(pluginName, key)` -- and it matches on the callee's member path, so any indirection
+ * loses the injection. Nothing errors when that happens: the key shifts into the plugin-name position,
+ * so every read and write silently targets a plugin named after the setting, and the user's toggles
+ * simply never persist.
  */
 
 /**

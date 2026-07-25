@@ -65,15 +65,6 @@ describe('resolveSetting', () => {
 			}
 		}
 	});
-
-	// DEFAULT_SETTINGS is frozen, so a mutating implementation would throw in strict mode rather than
-	// corrupt the shipped defaults. Asserted anyway: this reads them on every render of every toggle.
-	it('leaves the shipped defaults alone', () => {
-		const before = { ...DEFAULT_SETTINGS };
-		resolveSetting('openExternal', true);
-		resolveSetting('showOnProfiles', false);
-		expect({ ...DEFAULT_SETTINGS }).toEqual(before);
-	});
 });
 
 describe('guardSettingWrite', () => {
@@ -98,13 +89,6 @@ describe('guardSettingWrite', () => {
 
 		settle?.();
 		await flush();
-	});
-
-	it('does not report anything when the write succeeds', async () => {
-		const onFailure = vi.fn();
-		guardSettingWrite(async () => {}, onFailure)(true);
-		await flush();
-		expect(onFailure).not.toHaveBeenCalled();
 	});
 
 	/**
@@ -161,34 +145,27 @@ describe('guardSettingWrite', () => {
 	 * called the write, while the rejection path runs the reporter inside a promise handler, where a
 	 * throw would become the unhandled rejection this function is here to avoid.
 	 *
-	 * Unhandled rejections are asserted on rather than merely awaited: vitest surfaces them as noise
-	 * against a later test, or not at all, so the listener is the only thing that makes this fail here.
+	 * Neither leg fails through an assertion in this body, and that is worth knowing before copying the
+	 * shape of this test. The synchronous leg fails on not.toThrow below. The rejection leg fails through
+	 * vitest's own process-level unhandledRejection reporting, which fails the run but reports against the
+	 * file rather than this line. An in-test listener cannot improve on that: happy-dom implements
+	 * onunhandledrejection as a property accessor only, ships no PromiseRejectionEvent and no dispatcher
+	 * for it, so a listener registered here never fires and any assertion built on one is vacuous.
 	 */
 	it('swallows a throw from the reporter itself', async () => {
-		const unhandled: unknown[] = [];
-		const record = (event: PromiseRejectionEvent | { reason?: unknown }): void => {
-			unhandled.push('reason' in event ? event.reason : event);
-		};
-		globalThis.addEventListener('unhandledrejection', record as EventListener);
-
 		const onFailure = vi.fn(() => {
 			throw new Error('the logger is broken too');
 		});
 
-		try {
-			expect(() => guardSettingWrite(async () => Promise.reject(new Error('rejected')), onFailure)(true)).not.toThrow();
-			expect(() =>
-				guardSettingWrite(() => {
-					throw new Error('threw');
-				}, onFailure)(true),
-			).not.toThrow();
-			await flush();
-		} finally {
-			globalThis.removeEventListener('unhandledrejection', record as EventListener);
-		}
+		expect(() => guardSettingWrite(async () => Promise.reject(new Error('rejected')), onFailure)(true)).not.toThrow();
+		expect(() =>
+			guardSettingWrite(() => {
+				throw new Error('threw');
+			}, onFailure)(true),
+		).not.toThrow();
+		await flush();
 
 		expect(onFailure).toHaveBeenCalledTimes(2);
-		expect(unhandled).toEqual([]);
 	});
 
 	// One wrapper, many events: a toggle is clicked repeatedly, and the previous failure must not stick

@@ -13,14 +13,27 @@
  * width="40" height="40" for standalone use, and this component instead inherits whatever text size
  * the surrounding Steam component gives it, so it lines up with adjacent label text at any scale.
  *
+ * flexShrink is not decoration. Every mount point is a flex row of Steam's own making, and a flex item
+ * with an em-relative size is compressible: a tight row squashes the box below its own width and the
+ * mark distorts rather than overflowing. webkit/styles.ts:46 pins `flex:0 0 auto` on the same mark for
+ * the same reason.
+ *
  * Only `fill` and `d` appear here because they are the only attributes the trace emits, and React
- * spells both exactly as SVG does. If a future trace ever emits fill-rule, clip-rule, or
- * stroke-width, they have to become fillRule, clipRule, and strokeWidth: React silently drops the
- * hyphenated spellings, which loses the geometry with no warning anywhere. tests/frontend-icon.test.ts
- * fails if the asset grows an attribute this file does not carry, so that cannot pass unnoticed.
+ * spells both exactly as SVG does. If a future trace ever emits fill-rule, clip-rule, or stroke-width,
+ * transcribe them as fillRule, clipRule, and strokeWidth. React 16 and later do forward a hyphenated
+ * attribute to the DOM, so the mark would still draw, but each one logs a development warning naming
+ * the camelCase spelling, and Steam's console is not this plugin's to fill. The failure that actually
+ * loses geometry is the plainer one -- an attribute the asset carries and this transcription does not --
+ * and tests/frontend-icon.test.ts fails on any element or attribute the asset grows that this file does
+ * not know about, so neither can pass unnoticed.
  */
 export const CS2TrackerIcon = () => (
-	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" style={{ height: '1em', width: '1em' }} aria-hidden="true">
+	<svg
+		xmlns="http://www.w3.org/2000/svg"
+		viewBox="0 0 40 40"
+		style={{ flexShrink: 0, height: '1em', width: '1em' }}
+		aria-hidden="true"
+	>
 		<path
 			fill="#7f8181"
 			d="M32.992 24.345 L39.966 24.345 A17.432 17.432 0 0 1 24.345 39.966 L24.345 32.992 A10.515 10.515 0 0 0 32.992 24.345 Z"

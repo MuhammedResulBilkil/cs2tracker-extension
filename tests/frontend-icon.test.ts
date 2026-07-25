@@ -23,8 +23,14 @@ const ASSET = readFileSync(ASSET_PATH, 'utf8');
 /** Every shape element in the asset, as its raw source tag. */
 const ASSET_TAGS = [...ASSET.matchAll(/<path\b[^>]*>/g)].map(([tag]) => tag);
 
+/** Every element in the asset, shape or not, as its raw source tag. */
+const ALL_ASSET_TAGS = [...ASSET.matchAll(/<[a-zA-Z][^>]*>/g)].map(([tag]) => tag);
+
 const attribute = (tag: string, name: string): string | undefined =>
 	new RegExp(`\\b${name}="([^"]*)"`).exec(tag)?.[1];
+
+const attributeNames = (tags: string[]): string[] =>
+	[...new Set(tags.flatMap((tag) => [...tag.matchAll(/\s([a-zA-Z-]+)=/g)].map(([, name]) => name)))].sort();
 
 const ASSET_SHAPES = ASSET_TAGS.map((tag) => ({ fill: attribute(tag, 'fill'), d: attribute(tag, 'd') }));
 
@@ -41,14 +47,25 @@ describe('the asset the icon is transcribed from', () => {
 	});
 
 	/**
-	 * A canary for the transcription, not a fact about SVG. `fill` and `d` are spelled identically in
-	 * React, so today's transcription needs no conversion at all; the moment the trace emits fill-rule,
-	 * clip-rule, or stroke-width, the literal spelling would be dropped by React without a warning and
-	 * the mark would render wrong. Failing here forces the camelCase conversion to be made deliberately.
+	 * A canary for the transcription, not a fact about SVG. It pins the asset's whole vocabulary, and
+	 * scans every element rather than only the shapes: a hyphenated attribute on the root, or a new
+	 * <g>/<clipPath> wrapper, is just as easy to leave behind in a transcription as one on a shape, and
+	 * every other check in this file would still pass while the mark rendered wrong.
+	 *
+	 * Elements are pinned as well as attributes because a wrapper can carry no attributes at all and
+	 * still be structural -- a <g> that groups, or a <clipPath> that hides half the mark.
+	 *
+	 * `width` and `height` are in the list and are deliberately not transcribed: the asset carries them
+	 * for standalone use and the component sizes itself in em instead. Everything else here is carried.
+	 * A new name failing this test is the point -- it forces a decision about whether to transcribe it
+	 * and, if it is hyphenated, to convert it to React's camelCase spelling.
 	 */
-	it('uses only attributes React spells the same way', () => {
-		const names = [...new Set(ASSET_TAGS.flatMap((tag) => [...tag.matchAll(/\s([a-zA-Z-]+)=/g)].map(([, name]) => name)))];
-		expect(names.sort()).toEqual(['d', 'fill']);
+	it('is built from only the elements and attributes this transcription knows about', () => {
+		const elements = [...new Set(ALL_ASSET_TAGS.map((tag) => /^<([a-zA-Z]+)/.exec(tag)![1]))].sort();
+
+		expect(elements).toEqual(['path', 'svg']);
+		expect(attributeNames(ALL_ASSET_TAGS)).toEqual(['d', 'fill', 'height', 'viewBox', 'width', 'xmlns']);
+		expect(attributeNames(ASSET_TAGS)).toEqual(['d', 'fill']);
 	});
 });
 
@@ -86,9 +103,10 @@ describe('CS2TrackerIcon', () => {
 	});
 
 	/**
-	 * No hyphenated prop can reach React except an aria-/data- attribute, which React passes through
-	 * unchanged. This is the check that catches a fill-rule or stroke-width transcribed literally from a
-	 * future asset: React drops those silently, so nothing else here or on screen would report it.
+	 * No hyphenated prop except aria-/data-, which React passes through as written. This catches a
+	 * fill-rule or stroke-width transcribed literally from some future asset. React 16 and later do
+	 * forward such an attribute to the DOM, so the mark would still draw -- what it costs is a
+	 * development warning per attribute in Steam's console, which is not this plugin's to fill.
 	 */
 	it('spells every attribute the way React requires', () => {
 		const names = [icon.props, ...children.map((child) => child.props)].flatMap((props) => Object.keys(props));
@@ -98,8 +116,12 @@ describe('CS2TrackerIcon', () => {
 	// Task 11 mounts this beside label text inside Steam's own components, so it has to track their font
 	// size rather than a fixed pixel box. This is the one intentional difference from the asset, which
 	// carries width="40" height="40" for standalone use.
-	it('sizes itself in em so it inherits the surrounding text size', () => {
-		expect(icon.props.style).toEqual({ height: '1em', width: '1em' });
+	//
+	// flexShrink is asserted with the sizing because it is what makes the sizing hold: every mount point
+	// is a flex row of Steam's making, and without the guard a tight row compresses an em-sized item
+	// below its own width and distorts the mark. webkit/styles.ts:46 does the same in CSS.
+	it('sizes itself in em, and holds that size in a flex row', () => {
+		expect(icon.props.style).toEqual({ flexShrink: 0, height: '1em', width: '1em' });
 		expect(icon.props.width).toBeUndefined();
 		expect(icon.props.height).toBeUndefined();
 	});
