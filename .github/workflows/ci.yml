@@ -1,11 +1,23 @@
 name: CI
 
 on:
-    # No branch filter: feature branches must be verified before they reach
-    # master, not after.
+    # Feature branches must be verified before they reach master, not after.
+    #
+    # master is the one branch excluded, and not because it needs less checking:
+    # release.yml calls this workflow as its own first job, so every push to
+    # master runs all of it anyway, as the gate the release depends on. Letting
+    # the standalone trigger fire there too would put two runs of this workflow
+    # on one commit inside the same concurrency group below, where
+    # cancel-in-progress kills one of them. Which one is not determined — and if
+    # it killed the release's copy, the release would be blocked by a cancelled
+    # check rather than a failing one, which is a confusing way to not ship.
     push:
+        branches-ignore: [master]
     pull_request:
         branches: [master]
+    # Called by release.yml. A release cannot begin until every step below has
+    # passed on the very commit being released.
+    workflow_call:
 
 permissions:
     contents: read

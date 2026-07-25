@@ -25,7 +25,29 @@ concurrency:
     group: release
 
 jobs:
+    # The gate. `needs: verify` on the release job means nothing below runs until
+    # the whole CI workflow has passed on this exact commit — the three typecheck
+    # projects, the manifest version-drift check, the suite, the build, and the
+    # build-output assertions.
+    #
+    # Calling CI rather than duplicating it, and calling it rather than keying off
+    # its separate run: `workflow_run` fires after the fact and would need the
+    # released SHA threaded through by hand, while `needs:` is an ordinary
+    # dependency in one run with nothing to get wrong. It is also why CI's own
+    # push trigger now skips master — see the comment there.
+    #
+    # No `if:` here. The release job's `if` already confines publishing to master;
+    # this runs on any ref a workflow_dispatch can reach, which is what makes a
+    # dispatch on a feature branch report honestly instead of skipping straight to
+    # a no-op release job.
+    # Named `ci` rather than `verify` only so the check reads `ci / verify` on the
+    # commit instead of `verify / verify` — the job inside ci.yml is the one
+    # called `verify`.
+    ci:
+        uses: ./.github/workflows/ci.yml
+
     release:
+        needs: ci
         runs-on: ubuntu-latest
         # Because nothing cancels this workflow, nothing would rescue a hung run
         # from the runner's six-hour default either — and it holds the `release`
@@ -62,12 +84,19 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
-            # CI owns the full typecheck matrix; these three steps are here for a
-            # different reason. semantic-release builds the bundles and the zip
-            # from its publish step, which runs *after* the release commit and
-            # tag have been pushed. Running the same test suite, the same build,
-            # and the same packaging first means a failure lands while nothing
-            # has been published yet, instead of leaving a tag with no assets
+            # The `verify` job has already run the suite and the build on this
+            # commit, so these two steps are deliberate duplication, kept for one
+            # reason: they are the copy that lives in this file. CI's steps can be
+            # narrowed by an edit to ci.yml that looks harmless on its own, and
+            # the first thing that would tell anyone is a published release built
+            # from untested code. These cost about a minute on a job that runs a
+            # handful of times a year.
+            #
+            # The packaging smoke test below is not duplication — CI does not run
+            # it. semantic-release builds the bundles and the zip from its publish
+            # step, which runs *after* the release commit and tag have been
+            # pushed, so walking that code first is what keeps a failure on the
+            # near side of publishing instead of leaving a tag with no assets
             # against it.
             - name: Test
               run: pnpm test
