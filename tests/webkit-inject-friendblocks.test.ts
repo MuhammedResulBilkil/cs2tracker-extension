@@ -102,14 +102,35 @@ describe('injectFriendBlocks', () => {
 	/**
 	 * data-steamid is Steam's own attribute, so this is a sanity check on a trusted source rather than a
 	 * screen against hostile input -- but a value that is not a SteamID64 still builds a CS2Tracker URL
-	 * for an account that does not exist. Both fixtures matter: 'not-an-id' fails on shape, and
-	 * '12345678901234567' is 17 digits and therefore passes any digit-count test while sitting far below
-	 * the individual-account base.
+	 * for an account that does not exist. All three fixtures earn their place:
+	 *
+	 * 'not-an-id' fails on shape. '12345678901234567' is 17 digits, so it passes any digit-count test
+	 * while sitting far below the individual-account base, and only the BigInt range check rejects it.
+	 *
+	 * The empty one is the case the selector cannot help with: [data-steamid] tests the attribute's
+	 * presence, not its value, so an empty attribute is a matched row with nothing in it. Without it,
+	 * weakening the guard to `if (steamId && !isSteamId64(steamId)) return;` passes this entire file and
+	 * ships a badge pointing at a bare https://cs2tracker.gg/stats/ with no account on the end.
 	 */
 	it('skips rows whose data-steamid is not a SteamID64', () => {
-		document.body.innerHTML = friendRow('not-an-id') + friendRow('12345678901234567');
+		document.body.innerHTML = friendRow('not-an-id') + friendRow('12345678901234567') + friendRow('');
 		expect(injectFriendBlocks(document, false)).toBe(0);
 		expect(document.querySelectorAll(`a.${FRIEND_BADGE_CLASS}`)).toHaveLength(0);
+	});
+
+	/**
+	 * The trim, which no other fixture reaches: delete it and every case here still passes while a padded
+	 * attribute becomes a skipped row, because isSteamId64 accepts exactly 17 digits and nothing else. It
+	 * has to be that strict -- BigInt() silently tolerates surrounding whitespace and a leading '+' -- so
+	 * the trim is the module's job, not the validator's. Steam is not expected to emit padding; the point
+	 * is that the module either handles it or must not appear to.
+	 */
+	it('trims the attribute before validating it', () => {
+		document.body.innerHTML = friendRow(' 76561198145891996 ');
+		expect(injectFriendBlocks(document, false)).toBe(1);
+		expect(document.querySelector(`a.${FRIEND_BADGE_CLASS}`)!.getAttribute('href')).toBe(
+			'https://cs2tracker.gg/stats/76561198145891996',
+		);
 	});
 
 	/**
@@ -313,29 +334,55 @@ describe('observeFriendBlocks', () => {
 	});
 
 	/**
-	 * The stale-closure trap that comes free with making the observer single-instance. Once the observer
-	 * exists, an openExternal captured by its callback is frozen, so flipping the setting re-badges every
-	 * row on screen correctly -- the sweep uses the new value -- and then quietly hands the old scheme to
-	 * every row Steam renders afterwards. Both halves are asserted for that reason: the sweep, which is
-	 * easy, and the row that arrives later, which is the one that breaks.
+	 * The per-document half of the guard above, and the whole reason it is a WeakMap rather than a boolean.
+	 * Substituting `let observed = false`, cleared in the disposer, passes every other case in this file,
+	 * because no other case arms a second document -- and webkit/styles.ts records exactly this mistake in
+	 * its own module: a module-level "already injected" flag looks idempotent and leaves every page after
+	 * the first unstyled. Here it leaves every friends page after the first badged once at load and then
+	 * inert, so it stops badging the moment Steam re-renders the list.
+	 *
+	 * The row is inserted into the second document, not the first, so the assertion is that the second
+	 * document is genuinely observed rather than merely counted.
 	 */
-	it('hands later rows the current link scheme, not the one it started with', async () => {
-		document.body.innerHTML = `<div id="list">${friendRow('76561198145891996')}</div>`;
+	it('arms every document separately, not just the first', async () => {
+		const observe = vi.spyOn(MutationObserver.prototype, 'observe');
+		document.body.innerHTML = '<div id="list"></div>';
+		const second = document.implementation.createHTMLDocument('second');
+		second.body.innerHTML = '<div id="list"></div>';
+
 		observeFriendBlocks(document, false);
+		observeFriendBlocks(second, false);
+		expect(observe).toHaveBeenCalledTimes(2);
 
-		removeFriendBadges(document);
-		observeFriendBlocks(document, true);
-		expect(document.querySelector(`a.${FRIEND_BADGE_CLASS}`)!.getAttribute('href')).toBe(
-			'steam://openurl_external/https://cs2tracker.gg/stats/76561198145891996',
-		);
-
-		document.getElementById('list')!.insertAdjacentHTML('beforeend', friendRow('76561198314937074'));
+		second.getElementById('list')!.innerHTML = friendRow('76561198145891996');
 		await macrotask();
 
-		const later = document.querySelectorAll(`a.${FRIEND_BADGE_CLASS}`)[1];
-		expect(later.getAttribute('href')).toBe(
-			'steam://openurl_external/https://cs2tracker.gg/stats/76561198314937074',
-		);
+		expect(second.querySelectorAll(`a.${FRIEND_BADGE_CLASS}`)).toHaveLength(1);
+		expect(document.querySelectorAll(`a.${FRIEND_BADGE_CLASS}`)).toHaveLength(0);
+	});
+
+	/**
+	 * The structural backstop, which is hardening and not a fix: the marker guard already makes the
+	 * self-triggered pass add nothing, so no DOM assertion can tell a module that recognises its own
+	 * mutations from one that re-queries the whole document every time it wakes itself. The sweep count is
+	 * the only observable, which is why this is a spy. It is worth having because losing the marker guard
+	 * does not fail an assertion, it freezes the tab.
+	 *
+	 * Exactly one sweep: Steam's insertion earns it, and the badge and stylesheet that sweep appends must
+	 * not earn a second. Counting only calls with FRIEND_BLOCK_SELECTOR keeps the test's own queries and
+	 * anything happy-dom does internally out of the total.
+	 */
+	it('skips the wasted sweep when the only added nodes are its own', async () => {
+		document.body.innerHTML = '<div id="list"></div>';
+		observeFriendBlocks(document, false);
+		const sweeps = vi.spyOn(document, 'querySelectorAll');
+
+		document.getElementById('list')!.innerHTML = friendRow('76561198145891996');
+		await macrotask();
+		await macrotask();
+
+		expect(sweeps.mock.calls.filter(([selector]) => selector === FRIEND_BLOCK_SELECTOR)).toHaveLength(1);
+		expect(document.querySelectorAll(`a.${FRIEND_BADGE_CLASS}`)).toHaveLength(1);
 	});
 
 	/**

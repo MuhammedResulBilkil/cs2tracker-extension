@@ -2,7 +2,7 @@ import { buildProfileHref } from '../shared/cs2tracker';
 import { isSteamId64 } from '../shared/steamid';
 import { createIcon } from './icon';
 import { registerDisposer } from './lifecycle';
-import { ensureStyles } from './styles';
+import { STYLE_ELEMENT_ID, ensureStyles } from './styles';
 
 /**
  * One selector for every friends surface. /friends/, /friends/coplay/, /friends/pending/,
@@ -99,17 +99,51 @@ export function injectFriendBlocks(doc: Document, openExternal: boolean): number
 }
 
 /**
- * Live per-document observer state. A WeakMap, not a module-level flag, for the reason webkit/styles.ts
- * gives: the community browser runs this bundle against every community page it opens and each of those
- * is a separate document, so a single flag would look idempotent and leave every page after the first
- * unobserved. Weak keys also mean a closed page's entry goes away with the document.
+ * The documents this module is already watching. A WeakMap, not a module-level flag, for the reason
+ * webkit/styles.ts gives about its own idempotency check: the community browser runs this bundle against
+ * every community page it opens and each of those is a separate document, so one flag would look
+ * idempotent and leave every page after the first observed by nothing -- swept once at load and then
+ * silently inert the moment Steam re-rendered the list. Weak keys mean a closed page's entry goes away
+ * with the document.
  *
- * It holds the openExternal in use rather than just "observed", because the observer's callback reads it
- * on every mutation for the life of the page. Captured by value it would freeze at whatever the setting
- * was when the observer started, so flipping the setting would re-badge the visible rows correctly and
- * then hand the old scheme to every row Steam rendered afterwards.
+ * It records only that a document is observed. openExternal is captured by the callback rather than
+ * tracked here, because it cannot change while a page is open: the design specifies that settings changes
+ * are not pushed to already-open community pages, webkit reads settings once at page load, and the
+ * setting's own description tells the user to reopen the page. See observeFriendBlocks for why tracking
+ * it would be worse than useless rather than merely unnecessary.
  */
-const observedDocuments = new WeakMap<Document, { openExternal: boolean }>();
+const observedDocuments = new WeakMap<Document, MutationObserver>();
+
+/** nodeType of an element. Compared numerically because `instanceof Element` is per-realm. */
+const ELEMENT_NODE = 1;
+
+/**
+ * True when every node added in this batch was added by this module -- a badge, or the stylesheet.
+ *
+ * The structural half of the loop guard. The marker guard already makes the self-triggered pass add
+ * nothing, so this changes no outcome today; it is here because the consequence of losing that one `if`
+ * is a frozen Steam tab rather than a failed assertion, and a runaway is worth stopping in two
+ * independent places. It also skips a pointless full-document query on every wakeup this module caused
+ * itself, which on a badged 94-row list is every wakeup but Steam's.
+ *
+ * Inspecting the batch, not calling observer.takeRecords(): taking the records would also discard any
+ * Steam mutation that landed while the sweep was running, leaving a row unbadged until Steam happened to
+ * touch the DOM again. Inspecting keeps a mixed batch -- ours plus Steam's -- on the sweeping path, since
+ * one foreign node anywhere in it answers false.
+ *
+ * A batch with no added nodes at all answers true and is skipped, which is correct: attributes are not
+ * observed, so such a batch is pure removals, and removing nodes cannot produce a row that needs a badge.
+ */
+function isSelfInflicted(records: MutationRecord[]): boolean {
+	for (const record of records) {
+		for (const node of record.addedNodes) {
+			if (node.nodeType !== ELEMENT_NODE) return false;
+			const element = node as Element;
+			if (!element.classList.contains(FRIEND_BADGE_CLASS) && element.id !== STYLE_ELEMENT_ID) return false;
+		}
+	}
+	return true;
+}
 
 /**
  * Badge the rows that are there now and keep badging the ones Steam adds later -- the friends page
@@ -119,26 +153,30 @@ const observedDocuments = new WeakMap<Document, { openExternal: boolean }>();
  * That matters because the observer watches doc.documentElement with subtree:true, so it wakes on every
  * DOM change Steam makes; a second observer would double that work for the life of the page while adding
  * no badge the first one missed.
+ *
+ * Repeat calls have to pass the same openExternal, and nothing here can enforce it. Recording the latest
+ * value for the callback to read would not fix a caller that changed it, only disguise the result: the
+ * sweep skips every already-badged row, so the rows on screen would keep the old scheme while later ones
+ * got the new one, leaving one document with two kinds of link in it. Changing the value means disposing
+ * first, which drops the entry below and arms a fresh observer with a fresh capture. In Phase 1 that path
+ * does not exist -- settings are read once per page load and are not pushed to an open page.
  */
 export function observeFriendBlocks(doc: Document, openExternal: boolean): void {
 	// First, and unconditionally. A MutationObserver reports changes made after observe() and never
 	// replays existing nodes, so the rows already on screen are reachable only through this sweep.
 	injectFriendBlocks(doc, openExternal);
 
-	const active = observedDocuments.get(doc);
-	if (active) {
-		active.openExternal = openExternal;
-		return;
-	}
+	if (observedDocuments.has(doc)) return;
 
-	const state = { openExternal };
-	observedDocuments.set(doc, state);
-
-	const observer = new MutationObserver(() => injectFriendBlocks(doc, state.openExternal));
+	const observer = new MutationObserver((records) => {
+		if (isSelfInflicted(records)) return;
+		injectFriendBlocks(doc, openExternal);
+	});
 
 	// childList and subtree only. Watching attributes as well would make the marker this module writes on
 	// every badged row wake the observer, which is the same runaway the marker exists to prevent.
 	observer.observe(doc.documentElement, { childList: true, subtree: true });
+	observedDocuments.set(doc, observer);
 
 	// Store review checks for observers that are never disconnected, and this one outlives the page it was
 	// watching if nothing tears it down. The map entry is cleared alongside the disconnect so a later
@@ -156,6 +194,17 @@ export function observeFriendBlocks(doc: Document, openExternal: boolean): void 
  * Clearing the markers is not tidying: a row left marked is permanently un-badgeable, because every
  * later sweep reads the marker and skips it. Removing the badges alone would leave a page that looks
  * clean and can never be injected again.
+ *
+ * Two things this deliberately does not do, both of which are the caller's to complete:
+ *
+ * The stylesheet stays. It is shared with the profile button, so tearing it down here could unstyle an
+ * injection that has nothing to do with this teardown -- but it is not inert either. styles.ts records
+ * that .friend_block_v2{position:relative} re-anchors Steam's own absolutely positioned row descendants,
+ * so a page that has been un-badged is still carrying a layout change with nothing left to justify it.
+ * Whoever owns both removers owes removeStyles(doc) after them.
+ *
+ * The observer stays connected. If one is running on this document it will re-badge every row the next
+ * time Steam adds a node, so this belongs with disposeAll(), not on its own.
  */
 export function removeFriendBadges(doc: Document): void {
 	doc.querySelectorAll(`a.${FRIEND_BADGE_CLASS}`).forEach((badge) => badge.remove());
