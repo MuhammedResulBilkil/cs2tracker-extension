@@ -2,16 +2,20 @@ import { Field, Toggle } from '@steambrew/client';
 import type { PluginSettings } from '../../shared/settings';
 import { SETTING_LABELS } from '../services/setting-value';
 import { useSettings } from '../services/settings';
-import { LookupField } from './LookupField';
 
 /**
  * The panel under Millennium -> Plugins, and the only part of this plugin the user meets inside Steam's
  * own UI rather than on a web page.
  *
- * Three toggles and a lookup field, all of them Steam's components: Field and Toggle here, and TextField,
- * Field, DialogButton and Spinner in LookupField. No raw input or button, no stylesheet, no inline style,
- * no DOM of this plugin's own. The plugin database rejects custom-styled settings UI, so that is a
- * requirement and not a preference -- and it is also why the ordering below is the whole of the layout.
+ * Three toggles, and nothing else. Both of Steam's components: Field for each row, Toggle for the control
+ * inside it. No raw input or button, no stylesheet, no inline style, no DOM of this plugin's own. The
+ * plugin database rejects custom-styled settings UI, so that is a requirement and not a preference -- and
+ * it is also why the ordering below is the whole of the layout.
+ *
+ * It also held a lookup field and a "My profile" button, which have been removed along with everything
+ * only they reached: the vanity-name RPC in the backend, the two frontend service modules behind them, and
+ * the plugin's one outbound HTTP request. What is left injects links into pages the user is already
+ * looking at, so the panel is settings and nothing more.
  *
  * All three toggles come from one useSettings call, which reads the settings once from the Lua backend
  * and writes them back one key at a time. Not from Millennium's config API: reads through it never
@@ -120,12 +124,6 @@ export const SettingsPanel = () => {
 					onChange={(value) => setSetting('openExternal', value)}
 				/>
 			</Field>
-			{/*
-			 * openExternal is passed down rather than read again inside LookupField, so the panel holds one
-			 * reader of the settings and the toggle above cannot disagree with the button below about which
-			 * browser to open.
-			 */}
-			<LookupField openExternal={settings.openExternal} />
 		</>
 	);
 };

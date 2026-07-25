@@ -115,10 +115,9 @@ If your change adds or alters a decision, put that decision somewhere the suite 
 it there.
 
 Any module that imports from `@steambrew/client` or `@steambrew/webkit` cannot be tested at all,
-because those packages resolve to globals that exist only inside the Steam client. Six modules do
-(`frontend/index.tsx`, `frontend/components/SettingsPanel.tsx`, `frontend/components/LookupField.tsx`,
-`frontend/services/settings.ts`, `frontend/services/steamid.ts`, `webkit/settings.ts`), and they are
-deliberately kept to wiring and hold no logic. Adding a decision to one of them makes it untestable,
+because those packages resolve to globals that exist only inside the Steam client. Four modules do
+(`frontend/index.tsx`, `frontend/components/SettingsPanel.tsx`, `frontend/services/settings.ts`,
+`webkit/settings.ts`), and they are deliberately kept to wiring and hold no logic. Adding a decision to one of them makes it untestable,
 so please do not: extract it instead.
 
 ### Changes to injection selectors need a live Steam client

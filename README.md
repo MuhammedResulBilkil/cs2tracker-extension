@@ -12,7 +12,6 @@ A [Millennium](https://steambrew.app/) plugin that puts [CS2Tracker](https://cs2
 
 - **Profile button** — every Steam community profile gets a CS2Tracker button linking to that player's stats.
 - **Friend list badges** — your friends list, pending list, and recently-played-with list each get a per-row badge.
-- **In-client lookup** — paste a SteamID64, a profile URL, or a custom URL name into the plugin panel and jump straight to that player.
 - **Browser choice** — open CS2Tracker inside Steam or hand it to your system browser.
 
 ![Badges on the friends list](assets/screenshots/friend-list.png)
@@ -66,20 +65,17 @@ close or reload them.
 
 ## How it works
 
-The plugin runs in three places. A Lua backend stores your settings and resolves custom URL names to Steam IDs. A React panel inside Steam's own UI renders the settings and the lookup box using Steam's component library. A webkit bundle runs inside Steam's community browser and does the actual page injection, reading each profile's Steam ID from the page rather than from your own account.
+The plugin runs in three places. A Lua backend stores your settings. A React panel inside Steam's own UI renders those settings using Steam's component library. A webkit bundle runs inside Steam's community browser and does the actual page injection, reading each profile's Steam ID from the page rather than from your own account.
 
 ## Privacy
 
 Two separate questions, because they have different answers and both matter.
 
-**What the plugin sends by itself.** Nothing, to anybody but Steam. There is no CS2Tracker Extension server, no analytics and no telemetry, and the plugin makes exactly two requests of its own — both to `steamcommunity.com`:
-
-- the current page's `?xml=1` view, while working out whose profile you are looking at;
-- `steamcommunity.com/id/<name>/?xml=1`, when you type a custom URL name into the lookup box.
+**What the plugin sends by itself.** Nothing, to anybody but Steam. There is no CS2Tracker Extension server, no analytics and no telemetry, and the plugin makes exactly one request of its own: the current page's `?xml=1` view on `steamcommunity.com`, while working out whose profile you are looking at.
 
 Your settings are stored on your machine by Millennium. The buttons and badges are built locally, and putting one on a page sends nothing to CS2Tracker.
 
-**Where the links go.** Every CS2Tracker link contains the SteamID64 of the player it is about, so opening one sends that ID to `cs2tracker.gg` — that is how the site knows whose stats to show, and it is the whole point of the plugin. Clicking the profile button, a friend-list badge, or a lookup result therefore tells CS2Tracker which player you just looked up. Pressing **My profile** sends your own SteamID64.
+**Where the links go.** Every CS2Tracker link contains the SteamID64 of the player it is about, so opening one sends that ID to `cs2tracker.gg` — that is how the site knows whose stats to show, and it is the whole point of the plugin. Clicking the profile button or a friend-list badge therefore tells CS2Tracker which player you just looked up.
 
 This happens only when you click. Nothing reaches CS2Tracker in the background, no page you leave alone reports anything to it, and CS2Tracker is never contacted until you open a link. CS2Tracker is a third party: what it does with a request it receives is governed by its policies, not by this plugin.
 

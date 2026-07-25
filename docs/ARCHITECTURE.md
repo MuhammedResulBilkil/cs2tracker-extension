@@ -398,37 +398,33 @@ would be an assertion dressed as a type.
 ### Network surface
 
 The README makes a privacy claim on the store listing, so the full list of hosts this plugin can cause
-traffic to belongs here where it can be checked against. There are three, and they are not all the
-same kind of thing — which is exactly the distinction the README has to draw and an earlier version of
-this file got wrong.
+traffic to belongs here where it can be checked against. There are two, and they are not the same kind
+of thing — which is exactly the distinction the README has to draw and an earlier version of this file
+got wrong.
 
 | # | Host | What reaches it | Kind |
 |---|---|---|---|
-| 1 | `steamcommunity.com` | a vanity name the user typed | a request this plugin makes |
-| 2 | `steamcommunity.com` | the current page's own URL | a request this plugin makes |
-| 3 | `cs2tracker.gg` | the SteamID64 of the player the user asked about | **user-initiated navigation, not a plugin request** |
+| 1 | `steamcommunity.com` | the current page's own URL | a request this plugin makes |
+| 2 | `cs2tracker.gg` | the SteamID64 of the player whose page the user clicked from | **user-initiated navigation, not a plugin request** |
 
-1. **`ResolveVanity` in `backend/main.lua`** fetches `https://steamcommunity.com/id/<vanity>/?xml=1`
-   when the user types a custom URL name into the lookup box. The vanity is validated against
-   `^[A-Za-z0-9_%-]+$` at 2–32 characters *before* it reaches the format string, so it cannot steer
-   the request at another host or escape the path. `verify_ssl` is set explicitly — already the
-   library default — so that auditing this request does not require reading the `http` module.
-2. **`fromProfileXml` in `webkit/steamid.ts`** fetches the *current page's own* `?xml=1` view while
+1. **`fromProfileXml` in `webkit/steamid.ts`** fetches the *current page's own* `?xml=1` view while
    resolving a viewed profile's SteamID. This one is easy to overlook because it is automatic rather
    than user-initiated, and because it is conditional: it is step 3 of 4, so it runs only when the URL
    and `g_rgProfileData` have both missed and the document is a profile root. On a `/profiles/<id>/`
    URL step 1 always wins and this never fires.
-3. **`https://cs2tracker.gg/stats/<steamid64>`**, from `CS2TRACKER_PROFILE_BASE` in
-   `shared/cs2tracker.ts` and therefore present in both bundles. This is the destination of every link
-   the plugin builds: the profile button (`webkit/inject-profile.ts`), each friend-row badge
-   (`webkit/inject-friendblocks.ts`), and the panel's lookup and **My profile** buttons
-   (`frontend/services/steamid.ts`). In the **My profile** case the id is the *signed-in user's own*,
-   read from `App.m_CurrentUser.strSteamID`.
+2. **`https://cs2tracker.gg/stats/<steamid64>`**, from `CS2TRACKER_PROFILE_BASE` in
+   `shared/cs2tracker.ts`. This is the destination of every link the plugin builds: the profile button
+   (`webkit/inject-profile.ts`) and each friend-row badge (`webkit/inject-friendblocks.ts`).
 
-Rows 1 and 2 are requests this code issues. Row 3 is **not a request this plugin makes** — it is a URL
-handed to Steam or to the system browser when the user clicks, so the navigation is the user's and the
-plugin never fetches from `cs2tracker.gg` itself. Building a button sends nothing there; the id travels
-only when a link is opened.
+Row 1 is a request this code issues. Row 2 is **not a request this plugin makes** — it is a URL handed
+to Steam or to the system browser when the user clicks, so the navigation is the user's and the plugin
+never fetches from `cs2tracker.gg` itself. Building a button sends nothing there; the id travels only
+when a link is opened.
+
+There was a third row until the lookup field was removed: `ResolveVanity` in `backend/main.lua` fetched
+`steamcommunity.com/id/<vanity>/?xml=1` for a custom URL name the user typed. It is gone, along with the
+`http` module the backend required for it — so the backend now makes no network requests at all, and
+every remaining link is about a page the user was already looking at.
 
 That distinction is worth keeping precise, and it is emphatically not a reason to leave it out of the
 store listing. Opening a link tells a third party which player the user looked up, and in one case
@@ -480,10 +476,10 @@ had no rule that explained the behaviour.
 These are requirements from the plugin database's review, not preferences. Each one has already
 changed how something here is written:
 
-- **Steam's own components for settings UI.** `Field` for each row, with `Toggle`, `TextField`,
-  `DialogButton` and `Spinner` as the controls inside them — which is the composition the review
-  guidance names, and `ToggleField` is not on that list. No raw `input` or `button` anywhere in the
-  panel, no stylesheet, and no layout of the plugin's own — custom-styled settings UI is rejected, which is why the ordering of elements in
+- **Steam's own components for settings UI.** `Field` for each row, with `Toggle` as the control inside
+  it — which is the composition the review guidance names (`Field` for the row; `Toggle`, `TextField`,
+  `Dropdown` or `Slider` for the control), and `ToggleField` is not on that list. No raw `input` or
+  `button` anywhere in the panel, no stylesheet, and no layout of the plugin's own — custom-styled settings UI is rejected, which is why the ordering of elements in
   `SettingsPanel.tsx` is the whole of its layout. The one inline style in the frontend bundle is on
   the SVG mark in `frontend/assets/Icon.tsx`, which pins the icon to `1em` square with
   `flexShrink: 0`; it sizes the plugin's own glyph and styles nothing of Steam's.
@@ -601,21 +597,23 @@ client: `@steambrew/client` and `@steambrew/webkit` both resolve to globals the 
 installs, and `@steambrew/client`'s entry point additionally re-exports its modules extensionlessly,
 so Node's ESM resolver rejects it with `ERR_MODULE_NOT_FOUND` before any code runs.
 
-That bound is the reason for the shape of this codebase. Six modules import from a Steam package
+That bound is the reason for the shape of this codebase. Four modules import from a Steam package
 directly, and they are as short as they can be:
 
 | Module | What it imports |
 |---|---|
 | `frontend/index.tsx` | `definePlugin`, `Plugin` |
 | `frontend/components/SettingsPanel.tsx` | `Field`, `Toggle` |
-| `frontend/components/LookupField.tsx` | `DialogButton`, `Field`, `Spinner`, `TextField` |
 | `frontend/services/settings.ts` | `callable`, `toaster` |
-| `frontend/services/steamid.ts` | `callable` |
 | `webkit/settings.ts` | `callable` |
 
-Everything that carries a decision has been moved out of them into `shared/`,
-`frontend/services/setting-value.ts`, `frontend/services/lookup.ts`, `webkit/routing.ts` and
-`webkit/teardown.ts` — all of which the suite reaches. What is left in those six is wiring.
+It was six until the lookup field was removed. `frontend/components/LookupField.tsx` and
+`frontend/services/steamid.ts` are gone, and with them the only code here that touched `SteamClient` or
+read anything off `window` — the frontend now reaches the backend and nothing else.
+
+Everything that carries a decision has been moved out of these four into `shared/`,
+`frontend/services/setting-value.ts`, `webkit/routing.ts` and `webkit/teardown.ts` — all of which the
+suite reaches. What is left in them is wiring.
 
 `webkit/index.tsx` is worth a note: it imports nothing from `@steambrew/webkit` itself, but it is
 still untestable, because it reaches the package transitively through `webkit/settings.ts` and because

@@ -141,11 +141,7 @@ describe('RPC bindings', () => {
 	 * names rather than a count, so a binding cannot be dropped and replaced by a new one unnoticed.
 	 */
 	it('finds every RPC the bundles bind', () => {
-		expect([...new Set(rpcs.map((rpc) => rpc.name))].sort()).toEqual([
-			'GetSettings',
-			'ResolveVanity',
-			'SetSetting',
-		]);
+		expect([...new Set(rpcs.map((rpc) => rpc.name))].sort()).toEqual(['GetSettings', 'SetSetting']);
 	});
 
 	/**

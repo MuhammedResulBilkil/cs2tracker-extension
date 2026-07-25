@@ -66,8 +66,7 @@ const getSettingsRpc = callable<[], string>('GetSettings');
  * -- so here the mistake does not compile. The webkit package's `callable` is looser, and the keys
  * matching the backend's parameter names is beyond what either type can state, so
  * tests/backend-rpc.test.ts checks both against backend/main.lua directly. The object's keys arrive as
- * those named parameters, which is why they match `SetSetting(key, value)` exactly;
- * frontend/services/steamid.ts binds ResolveVanity the same way.
+ * those named parameters, which is why they match `SetSetting(key, value)` exactly.
  *
  * `key: string`, not `key: keyof PluginSettings`: this is a wire signature and what crosses it is
  * JSON. The caller below narrows it, and the backend re-checks it against its own allowlist, because

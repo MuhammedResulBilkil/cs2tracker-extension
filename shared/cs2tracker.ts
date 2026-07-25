@@ -14,8 +14,3 @@ export function buildProfileHref(steamId64: string, openExternal: boolean): stri
 	const url = buildProfileUrl(steamId64);
 	return openExternal ? `steam://openurl_external/${url}` : url;
 }
-
-/** Argument for SteamClient.URL.ExecuteSteamURL, called from Steam's UI. */
-export function buildSteamUrlCommand(steamId64: string, openExternal: boolean): string {
-	return `steam://openurl${openExternal ? '_external' : ''}/${buildProfileUrl(steamId64)}`;
-}

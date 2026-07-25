@@ -33,16 +33,15 @@ const STEAMID64_MAX = STEAMID64_BASE + ACCOUNT_ID_MAX;
  *     one. Without them an 18-digit id yields the first 17 digits, which is a different, real
  *     account, and a 33-character vanity yields a different, real 32-character name.
  *
- * Both carry `i`, and it is the one thing here that is about the user rather than about safety. A
- * hostname is case-insensitive by definition, and a URL copied out of a browser's address bar or
- * typed by hand arrives as `HTTPS://SteamCommunity.com/id/foo` as readily as in lower case -- so
- * without the flag the lookup box answers "not a valid profile" to a profile URL that is perfectly
- * valid, which is the plugin telling the user they are wrong about something they are right about.
+ * Both carry `i`, because a hostname is case-insensitive by definition and Steam serves a profile
+ * under whatever casing the URL was written in. Without the flag, a page reached as
+ * `HTTPS://SteamCommunity.com/id/foo` is classified `invalid`, which in webkit means the profile root
+ * goes unrecognised and no button is injected into a page that should have had one.
  *
  * It widens nothing that matters. Both capture groups and both lookaheads already span `A-Za-z`, so
- * `i` cannot admit a character they would have rejected; `\d{17}` has no case to fold. It leaves the
- * captured text exactly as written, too, so a mixed-case vanity reaches ResolveVanity as the user
- * typed it -- which is what Steam's own vanity resolution expects, being case-insensitive itself.
+ * `i` cannot admit a character they would have rejected; `\d{17}` has no case to fold. It also leaves
+ * the captured text exactly as written rather than folding it, which is the behaviour to keep: Steam
+ * treats a vanity case-insensitively but displays it as registered.
  */
 const PROFILES_URL_PATTERN = /^(?:https?:\/\/)?(?:www\.)?steamcommunity\.com\/profiles\/(\d{17})(?!\d)/i;
 const VANITY_URL_PATTERN =

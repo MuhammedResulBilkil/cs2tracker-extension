@@ -137,14 +137,14 @@ describe('parseLookupInput', () => {
 	});
 
 	/**
-	 * This function's input is whatever the user typed or pasted into the lookup box, and a hostname is
-	 * case-insensitive by definition -- so a URL that arrives as `SteamCommunity.com` is the same URL. Without
-	 * the `i` flag on both patterns it fell through to the bare-vanity test, failed that too on the `/` and
-	 * `:` characters, and came back invalid: the plugin telling the user that a valid profile URL is not one.
+	 * This function's input is the URL of the page webkit is running on, and a hostname is case-insensitive
+	 * by definition -- so a URL that arrives as `SteamCommunity.com` is the same URL. Without the `i` flag on
+	 * both patterns it fell through to the bare-vanity test, failed that too on the `/` and `:` characters,
+	 * and came back invalid -- which in webkit means an unrecognised profile root and no button on a page
+	 * that should have had one.
 	 *
 	 * The scheme and the path segment are folded by the same flag, so they are pinned here as well. What is
-	 * deliberately *not* folded is the captured text: a mixed-case vanity has to reach ResolveVanity spelled
-	 * the way it was typed, which the last case checks.
+	 * deliberately *not* folded is the captured text, which the last case checks.
 	 */
 	it('accepts a URL whose host, scheme, or path segment is mixed-case', () => {
 		expect(parseLookupInput('https://SteamCommunity.com/id/foo/')).toEqual({ kind: 'vanity', value: 'foo' });
