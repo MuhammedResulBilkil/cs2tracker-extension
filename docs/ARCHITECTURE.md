@@ -334,7 +334,7 @@ this file got wrong.
 
 Rows 1 and 2 are requests this code issues. Row 3 is **not a request this plugin makes** — it is a URL
 handed to Steam or to the system browser when the user clicks, so the navigation is the user's and the
-plugin never fetches from `cs2tracker.gg` itself. Building a button contacts nothing; the id travels
+plugin never fetches from `cs2tracker.gg` itself. Building a button sends nothing there; the id travels
 only when a link is opened.
 
 That distinction is worth keeping precise, and it is emphatically not a reason to leave it out of the

@@ -2,7 +2,8 @@ import type { PluginSettings } from '../shared/settings';
 import { registerDisposer } from './lifecycle';
 
 /**
- * This module holds every decision the entry point makes, and imports nothing but the disposer registry.
+ * This module holds every decision the entry point makes, and imports nothing but the disposer registry and
+ * shared/settings.
  *
  * That is deliberate rather than tidy. webkit/index.tsx reaches @steambrew/webkit through settings.ts, and
  * @steambrew/webkit exists only inside the Steam client, so a test that imports the entry cannot load at

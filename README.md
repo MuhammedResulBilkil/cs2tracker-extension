@@ -77,11 +77,11 @@ Two separate questions, because they have different answers and both matter.
 - the current page's `?xml=1` view, while working out whose profile you are looking at;
 - `steamcommunity.com/id/<name>/?xml=1`, when you type a custom URL name into the lookup box.
 
-Your settings are stored on your machine by Millennium. The buttons and badges are built locally, and putting one on a page contacts nothing.
+Your settings are stored on your machine by Millennium. The buttons and badges are built locally, and putting one on a page sends nothing to CS2Tracker.
 
 **Where the links go.** Every CS2Tracker link contains the SteamID64 of the player it is about, so opening one sends that ID to `cs2tracker.gg` — that is how the site knows whose stats to show, and it is the whole point of the plugin. Clicking the profile button, a friend-list badge, or a lookup result therefore tells CS2Tracker which player you just looked up. Pressing **My profile** sends your own SteamID64.
 
-This happens only when you click. Nothing is sent in the background, no page you leave alone reports anything, and CS2Tracker is never contacted until you open a link. CS2Tracker is a third party: what it does with a request it receives is governed by its policies, not by this plugin.
+This happens only when you click. Nothing reaches CS2Tracker in the background, no page you leave alone reports anything to it, and CS2Tracker is never contacted until you open a link. CS2Tracker is a third party: what it does with a request it receives is governed by its policies, not by this plugin.
 
 ## Development
 
