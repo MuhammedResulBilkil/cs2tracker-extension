@@ -1,0 +1,89 @@
+import { buildProfileHref } from '../shared/cs2tracker';
+import { createIcon } from './icon';
+import { resolveProfileSteamId } from './steamid';
+import { ensureStyles } from './styles';
+
+/**
+ * Marks the wrapper this module owns. It is the idempotency key and the teardown key both, so it has
+ * to be specific enough that nothing Steam ships collides with it.
+ */
+export const PROFILE_CONTAINER_CLASS = 'cs2tracker-extension-container';
+
+const RIGHT_COLUMN_SELECTOR = '.profile_rightcol';
+const BUTTON_LABEL = 'CS2Tracker.gg';
+
+/**
+ * Add the CS2Tracker button to a Steam community profile page.
+ * Returns true only when a button was actually added.
+ *
+ * The return value is the signal a retry loop reads, so "false" has to mean "nothing is in the
+ * document" for every one of its reasons -- no column yet, already injected, unknown profile, or the
+ * slot detached while we were resolving -- and never "added, probably".
+ */
+export async function injectProfileButton(doc: Document, win: unknown, openExternal: boolean): Promise<boolean> {
+	const column = doc.querySelector(RIGHT_COLUMN_SELECTOR);
+	if (!column) return false;
+	if (column.querySelector(`.${PROFILE_CONTAINER_CLASS}`)) return false;
+
+	// Reserve the slot before the async lookup so the button cannot land in the wrong position if Steam
+	// finishes rendering the column while we wait. It also closes the re-entrancy window: the guard
+	// above is what makes a second call during the same await return false instead of injecting twice.
+	const container = doc.createElement('div');
+	container.className = `account-row ${PROFILE_CONTAINER_CLASS}`;
+	column.insertBefore(container, column.children[1] ?? null);
+
+	const steamId = await resolveProfileSteamId(doc, win);
+	if (!steamId) {
+		// The reserved slot has to go back, and the reason that outranks appearance is the guard above:
+		// a container left behind reads as "already injected", so every later retry on that page --
+		// including the one after Steam finishes populating g_rgProfileData -- refuses to run. The
+		// cosmetic cost is real too, since the container carries Steam's own account-row class and is
+		// therefore not guaranteed to collapse to nothing in the sidebar.
+		container.remove();
+		return false;
+	}
+
+	// The container was in the document when we reserved it; the await is where that can stop being true.
+	// A teardown, or Steam re-rendering the sidebar, detaches it while the lookup is in flight, and
+	// everything below would then build the button inside an orphan and report success for a button
+	// nobody can see. Returning false is also what lets a caller's retry try again against the new
+	// column, which reporting success would have talked it out of.
+	if (!container.isConnected) return false;
+
+	// After the guard, not before: a page that resolves to nothing gets no button, so it has no use for
+	// the stylesheet either -- and the sheet declares position:relative on Steam's own .friend_block_v2,
+	// which is not a change worth making on a page this module is about to leave alone.
+	ensureStyles(doc);
+
+	// An anchor with an href, deliberately -- not a div with a click handler. That is what makes the
+	// button tab-reachable, focusable and openable with Enter without a line of code, and Steam's own
+	// middle-click and context-menu behaviour comes with it.
+	const link = doc.createElement('a');
+	link.className = 'cs2tracker-btn';
+	link.href = buildProfileHref(steamId, openExternal);
+	link.title = `${BUTTON_LABEL} — view CS2 stats`;
+
+	// createIcon returns null when the markup will not parse. A label with no icon is degraded but
+	// still a working button, so the icon is optional and the label is not: the icon is aria-hidden,
+	// which leaves the label as the button's entire accessible name.
+	const icon = createIcon(doc, 'cs2tracker-btn__icon');
+	if (icon) link.appendChild(icon);
+
+	const label = doc.createElement('span');
+	label.textContent = BUTTON_LABEL;
+	link.appendChild(label);
+
+	container.appendChild(link);
+	return true;
+}
+
+/**
+ * Undo injectProfileButton. Safe on a document that was never injected.
+ *
+ * querySelectorAll, not querySelector: teardown has to be total. Steam can navigate the community
+ * browser without a document reload, so if a stale container ever survives alongside a fresh one,
+ * removing only the first leaves a button pointing at whichever profile was on screen before.
+ */
+export function removeProfileButton(doc: Document): void {
+	doc.querySelectorAll(`.${PROFILE_CONTAINER_CLASS}`).forEach((node) => node.remove());
+}
