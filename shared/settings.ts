@@ -78,7 +78,7 @@ function report(onProblem: ((reason: string) => void) | undefined, reason: strin
  * value of it -- a hook that also fired for "{}" would train its reader to ignore it. So an absent or blank
  * payload is quiet: the backend answers "{}" when it cannot encode -- having already logged the reason on the
  * Lua side -- and an empty config is what a first run looks like before anything has been written. Blank
- * rather than strictly empty, because `cjson.encode` cannot produce whitespace, so a payload of spaces means
+ * rather than strictly empty, because `json.encode` cannot produce whitespace, so a payload of spaces means
  * the same thing an empty one does and not something worth its own vocabulary.
  *
  * The per-key case is the one that matters most in practice, and it is the reason the hook takes a reason

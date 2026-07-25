@@ -256,7 +256,7 @@ describe('parseSettings problem reporting', () => {
 
 	/**
 	 * "{}" is valid JSON, an object, and exactly what a first run looks like before anything has been written --
-	 * and it is also what the backend answers with when its own cjson.encode fails, having already logged the
+	 * and it is also what the backend answers with when its own json.encode fails, having already logged the
 	 * reason on the Lua side. Firing here would put a warning in the console of every fresh install.
 	 */
 	it('stays quiet for an empty config', () => {
@@ -275,7 +275,7 @@ describe('parseSettings problem reporting', () => {
 		expect(onProblem).not.toHaveBeenCalled();
 	});
 
-	// Blank rather than strictly empty: cjson.encode cannot produce whitespace, so a payload of spaces means
+	// Blank rather than strictly empty: json.encode cannot produce whitespace, so a payload of spaces means
 	// the same thing an empty one does, and giving it its own reason would be inventing a distinction.
 	it('stays quiet for an empty or blank payload', () => {
 		const onProblem = vi.fn();

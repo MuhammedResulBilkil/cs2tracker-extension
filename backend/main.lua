@@ -1,6 +1,9 @@
 local logger = require("logger")
 local millennium = require("millennium")
-local cjson = require("cjson")
+-- Millennium v3.3.1 preloads this as `json`. It is documented as `cjson` and the official
+-- PluginTemplate ships a `---@meta` stub under that name, but nothing preloads it -- requiring
+-- `cjson` kills the backend before it opens its IPC socket, with only an exit code to show for it.
+local json = require("json")
 local http = require("http")
 
 local LOG_PREFIX = "CS2Tracker Extension: "
@@ -54,7 +57,7 @@ end
 -- function name, not through this module's return table. Declaring it local
 -- fails at runtime with "function not found".
 function GetSettings()
-    local ok, encoded = pcall(cjson.encode, current_settings())
+    local ok, encoded = pcall(json.encode, current_settings())
     if ok and type(encoded) == "string" then
         return encoded
     end

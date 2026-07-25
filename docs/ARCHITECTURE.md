@@ -155,7 +155,35 @@ as an optional dependency either way. The file exists to keep the exit code at z
 
 ## Traps
 
-These five have all cost real time. Each of them fails silently.
+These six have all cost real time. Each of them fails silently.
+
+### The JSON module is `json`, and a type stub is not evidence
+
+`require("cjson")` kills the backend. Millennium v3.3.1 preloads the JSON module as **`json`**.
+
+This is worth understanding rather than just obeying, because the mistake was reasonable. `cjson` has
+its own page on Millennium's documentation site, and the official `PluginTemplate` ships
+`backend/types/cjson.lua` as a `---@meta` stub. Both were treated as proof the runtime provides it.
+Neither is: the docs run ahead of the current stable release, and a `---@meta` file is a declaration
+for the language server that asserts nothing about what is loaded at runtime. The template's own
+`main.lua` never requires it.
+
+The failure is about as opaque as this codebase gets. A `require` of a missing module raises during
+module load — before `on_load`, before `millennium.ready()`, before the backend opens its IPC socket.
+So there is no plugin log to read, no Lua traceback surfaced anywhere, and no socket under
+`%LOCALAPPDATA%\Temp\millennium-plugin-*`. Steam shows a crash dialog with exit code `0x00000001` and
+nothing else. It is indistinguishable from a syntax error or a crash inside `on_load`.
+
+What settled it was comparing against installed plugins that work. `alowave.faceit_stats` requires
+`logger`, `millennium`, `http`, `json`, `fs`, `utils`, ships no `json.lua` of its own, and has a live
+socket — so `json` is preloaded. No installed plugin requires `cjson`, and no file named `cjson`
+exists anywhere in the Millennium install.
+
+`tests/backend-modules.test.ts` now guards this: it parses `backend/main.lua` and fails if it requires
+anything outside an allowlist built from modules **observed resolving** on a running v3.3.1, rather
+than from documentation. `backend/types/json.lua` was rewritten to declare only `encode` and `decode`
+for the same reason — a stub that promises more than the runtime provides will autocomplete you into a
+crash that reports nothing.
 
 ### Lua RPC functions must be global
 
