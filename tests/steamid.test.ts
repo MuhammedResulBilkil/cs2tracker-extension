@@ -27,6 +27,22 @@ describe('accountIdToSteamId64', () => {
 		expect(accountIdToSteamId64('abc')).toBeNull();
 		expect(accountIdToSteamId64('')).toBeNull();
 	});
+
+	// '00' is numerically the "no account" value, so it must be rejected like '0'. Returning the
+	// bare base id here would hand callers 76561197960265728 dressed up as a real profile.
+	it('rejects zero written with padding', () => {
+		expect(accountIdToSteamId64('00')).toBeNull();
+		expect(accountIdToSteamId64('0000000000')).toBeNull();
+	});
+
+	it('accepts the largest unsigned 32-bit account id', () => {
+		expect(accountIdToSteamId64('4294967295')).toBe('76561202255233023');
+	});
+
+	it('rejects account ids above the unsigned 32-bit range', () => {
+		expect(accountIdToSteamId64('4294967296')).toBeNull();
+		expect(accountIdToSteamId64('99999999999999999999')).toBeNull();
+	});
 });
 
 describe('parseLookupInput', () => {
@@ -51,6 +67,37 @@ describe('parseLookupInput', () => {
 
 	it('treats a bare name as a vanity', () => {
 		expect(parseLookupInput('intkira')).toEqual({ kind: 'vanity', value: 'intkira' });
+	});
+
+	it('accepts a scheme-less and a www URL', () => {
+		expect(parseLookupInput('steamcommunity.com/profiles/76561198145891996')).toEqual({
+			kind: 'steamid64',
+			value: '76561198145891996',
+		});
+		expect(parseLookupInput('https://www.steamcommunity.com/id/intkira')).toEqual({ kind: 'vanity', value: 'intkira' });
+	});
+
+	// One extra digit must not be silently truncated to a valid-looking id: that would send the
+	// user to a stranger's stats page with no error shown.
+	it('rejects a /profiles/ URL carrying more than 17 digits', () => {
+		expect(parseLookupInput('https://steamcommunity.com/profiles/765611981458919961')).toEqual({ kind: 'invalid' });
+	});
+
+	it('rejects a /profiles/ URL whose id is outside the Steam range', () => {
+		expect(parseLookupInput('https://steamcommunity.com/profiles/12345678901234567')).toEqual({ kind: 'invalid' });
+	});
+
+	// The bare 33-character name is rejected below, so the URL form has to agree with it.
+	it('rejects an over-long vanity in an /id/ URL', () => {
+		expect(parseLookupInput(`https://steamcommunity.com/id/${'x'.repeat(33)}`)).toEqual({ kind: 'invalid' });
+	});
+
+	it('requires steamcommunity.com to be the host rather than any path segment', () => {
+		expect(parseLookupInput('https://evil.example/steamcommunity.com/id/admin')).toEqual({ kind: 'invalid' });
+		expect(parseLookupInput('https://evil.example/steamcommunity.com/profiles/76561198145891996')).toEqual({
+			kind: 'invalid',
+		});
+		expect(parseLookupInput('https://steamcommunity.com.evil.example/id/admin')).toEqual({ kind: 'invalid' });
 	});
 
 	it('rejects empty input and anything with unsafe characters', () => {

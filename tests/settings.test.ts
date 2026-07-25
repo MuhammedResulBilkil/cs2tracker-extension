@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS, normalizeSettings } from '../shared/settings';
 
+describe('DEFAULT_SETTINGS', () => {
+	// Pinned against literals, not against the imported object: the Lua backend hardcodes these
+	// same three values, so a change here has to break a test rather than drift silently.
+	it('ships the documented default for every key', () => {
+		expect(DEFAULT_SETTINGS).toEqual({
+			openExternal: false,
+			showOnProfiles: true,
+			showOnFriendLists: true,
+		});
+	});
+
+	it('is frozen so a consumer cannot mutate the shared defaults', () => {
+		expect(Object.isFrozen(DEFAULT_SETTINGS)).toBe(true);
+	});
+});
+
 describe('normalizeSettings', () => {
 	it('returns the defaults for null, undefined, and non-objects', () => {
 		expect(normalizeSettings(null)).toEqual(DEFAULT_SETTINGS);
