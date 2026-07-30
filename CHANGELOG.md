@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/MuhammedResulBilkil/cs2tracker-extension/compare/v1.0.0...v1.0.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* pin the store's images to the release tag they were reviewed at ([93a8186](https://github.com/MuhammedResulBilkil/cs2tracker-extension/commit/93a8186793db4aaa32259b323d0f1e2a29aeb66c))
+
 # 1.0.0 (2026-07-25)
 
 

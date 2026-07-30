@@ -1,6 +1,6 @@
 {
 	"name": "cs2tracker-extension",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Adds CS2Tracker profile links to Steam profiles and friend lists.",
 	"type": "module",
 	"main": "./frontend/index.tsx",

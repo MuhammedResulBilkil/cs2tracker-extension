@@ -3,9 +3,9 @@
 	"name": "cs2tracker-extension",
 	"common_name": "CS2Tracker Extension",
 	"description": "Adds CS2Tracker profile links to Steam profiles and friend lists.",
-	"thumbnail": "https://raw.githubusercontent.com/MuhammedResulBilkil/cs2tracker-extension/v1.0.0/assets/thumbnail.png",
-	"splash_image": "https://raw.githubusercontent.com/MuhammedResulBilkil/cs2tracker-extension/v1.0.0/assets/splash.png",
-	"version": "1.0.0",
+	"thumbnail": "https://raw.githubusercontent.com/MuhammedResulBilkil/cs2tracker-extension/v1.0.1/assets/thumbnail.png",
+	"splash_image": "https://raw.githubusercontent.com/MuhammedResulBilkil/cs2tracker-extension/v1.0.1/assets/splash.png",
+	"version": "1.0.1",
 	"backendType": "lua",
 	"webkitApiVersion": "2.0.0"
 }
